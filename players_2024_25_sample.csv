@@ -1,0 +1,21 @@
+name,position,team,price,points,predicted_points
+M. Salah,MID,Liverpool,13.6,344,9.1
+Bryan Mbeumo,MID,Brentford,8.3,236,6.2
+Cole Palmer,MID,Chelsea,10.5,214,5.8
+Alexander Isak,FWD,Newcastle,9.4,211,6.2
+Chris Wood,FWD,Nottm Forest,7.2,200,5.6
+Jarrod Bowen,MID,West Ham,7.9,193,5.7
+Ollie Watkins,FWD,Aston Villa,9.2,186,4.9
+Yoane Wissa,FWD,Brentford,6.9,185,5.3
+Luis Díaz,MID,Liverpool,7.5,183,5.1
+Alisson Becker,GK,Liverpool,5.4,36,5.1
+Budget GK,GK,BudgetTeamGK,4.0,20,3.0
+Ola Aina,DEF,Nottingham Forest,4.9,75,4.4
+Ashley Young,DEF,Unknown,4.7,62,4.8
+Gabriel Magalhaes,DEF,Arsenal,6.2,73,4.9
+Budget DEF 1,DEF,BudgetTeamDEF1,4.0,30,3.0
+Budget DEF 2,DEF,BudgetTeamDEF2,4.0,30,3.0
+Budget MID 1,MID,BudgetTeamMID1,4.5,25,3.0
+Budget MID 2,MID,BudgetTeamMID2,4.5,25,3.0
+Budget MID 3,MID,BudgetTeamMID3,4.5,25,3.0
+Budget FWD,FWD,BudgetTeamFWD,5.0,25,3.0
