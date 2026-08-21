@@ -2,7 +2,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 
 const API = "https://fantasy.premierleague.com/api";
 const headers = {
-  "User-Agent": "FPL-Optimal-XI/2.0 (+https://kwkhong.github.io/fpl-squad-optimiser/)",
+  "User-Agent": "FPL-Optimal-XI/3.0 (+https://kwkhong.github.io/fpl-squad-optimiser/)",
   Accept: "application/json",
 };
 
@@ -71,8 +71,8 @@ for (const { event, data } of liveEvents) {
 }
 
 const payload = {
-  schemaVersion: 2,
-  modelVersion: "2.0.0",
+  schemaVersion: 3,
+  modelVersion: "3.0.0",
   updatedAt: new Date().toISOString(),
   source: "Official Fantasy Premier League API",
   bootstrap,
