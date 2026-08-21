@@ -39,12 +39,17 @@ also republishes automatically every hour. In repository settings, set
 
 ## Model and validation
 
-Model v2 separates prediction from decision strategy. Expected points combine
+Model v3 separates prediction from decision strategy. Its structural layer combines
 appearance points, position-specific goal value, expected assists, Poisson clean-sheet
 probability, saves, goals conceded, cards and empirically shrunk bonus rates. Recent
 gameweeks influence expected minutes and form, while older team results receive less
 weight. Squad construction uses deterministic beam search followed by legal local
 improvement and scores the XI, captain and likely autosub value.
+
+A position-specific ensemble calibrates that structural forecast against recent form
+and expected-minutes bands. It is warm-started only from the prior season and then
+uses a trailing eight-gameweek window. The deployment gate rejects Model v3 unless
+its leakage-safe historical MAE is at least 5% lower than the structural model.
 
 The deployment workflow backtests the model on the most recent eligible gameweeks
 using only player statistics available before each predicted gameweek. It records MAE,
