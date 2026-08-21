@@ -2,17 +2,26 @@ import { mkdir, writeFile } from "node:fs/promises";
 
 const API = "https://fantasy.premierleague.com/api";
 const headers = {
-  "User-Agent": "FPL-Optimal-XI/1.0 (+https://kwkhong.github.io/fpl-squad-optimiser/)",
+  "User-Agent": "FPL-Optimal-XI/2.0 (+https://kwkhong.github.io/fpl-squad-optimiser/)",
   Accept: "application/json",
 };
 
 async function getJson(path) {
-  const response = await fetch(`${API}${path}`, {
-    headers,
-    signal: AbortSignal.timeout(30000),
-  });
-  if (!response.ok) throw new Error(`${path} returned HTTP ${response.status}`);
-  return response.json();
+  let lastError;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      const response = await fetch(`${API}${path}`, {
+        headers,
+        signal: AbortSignal.timeout(30000),
+      });
+      if (!response.ok) throw new Error(`${path} returned HTTP ${response.status}`);
+      return await response.json();
+    } catch (error) {
+      lastError = error;
+      if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, 500 * (2 ** (attempt - 1))));
+    }
+  }
+  throw lastError;
 }
 
 const [bootstrap, fixtures] = await Promise.all([
@@ -33,15 +42,49 @@ if (!Array.isArray(fixtures) || fixtures.length < 100) {
   throw new Error("Fixture feed is missing or unexpectedly small");
 }
 
+const completedEvents = bootstrap.events
+  .filter((event) => event.finished)
+  .map((event) => event.id)
+  .sort((a, b) => a - b)
+  .slice(-12);
+const liveEvents = [];
+for (let index = 0; index < completedEvents.length; index += 4) {
+  const batch = completedEvents.slice(index, index + 4);
+  liveEvents.push(...await Promise.all(batch.map(async (event) => ({
+    event,
+    data: await getJson(`/event/${event}/live/`),
+  }))));
+}
+const historyByPlayer = {};
+const fields = [
+  "minutes", "total_points", "expected_goals", "expected_assists",
+  "goals_scored", "assists", "bonus", "bps", "clean_sheets", "saves",
+  "goals_conceded", "yellow_cards", "red_cards", "starts",
+];
+
+for (const { event, data } of liveEvents) {
+  for (const element of data.elements || []) {
+    const stats = { event };
+    for (const field of fields) stats[field] = Number(element.stats?.[field] || 0);
+    (historyByPlayer[element.id] ||= []).push(stats);
+  }
+}
+
 const payload = {
+  schemaVersion: 2,
+  modelVersion: "2.0.0",
   updatedAt: new Date().toISOString(),
   source: "Official Fantasy Premier League API",
   bootstrap,
   fixtures,
+  historyEvents: completedEvents,
+  historyByPlayer,
+  modelMetrics: null,
 };
 
 await mkdir("data", { recursive: true });
 await writeFile("data/fpl.json", JSON.stringify(payload));
 console.log(
-  `Validated ${bootstrap.elements.length} players, ${bootstrap.teams.length} clubs and ${fixtures.length} fixtures at ${payload.updatedAt}`
+  `Validated ${bootstrap.elements.length} players, ${bootstrap.teams.length} clubs, ` +
+  `${fixtures.length} fixtures and ${completedEvents.length} gameweeks at ${payload.updatedAt}`
 );
