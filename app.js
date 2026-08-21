@@ -1,4 +1,5 @@
 const FPL_API = "https://fantasy.premierleague.com/api";
+const FPL_SQUAD_URL = "https://fantasy.premierleague.com/en/squad-selection";
 
 const POSITION = { 1: "GK", 2: "DEF", 3: "MID", 4: "FWD" };
 const POSITION_LIMITS = { GK: 2, DEF: 5, MID: 5, FWD: 3 };
@@ -13,6 +14,7 @@ const state = {
   fixtures: [],
   live: false,
   importedIds: [],
+  recommendation: null,
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -269,6 +271,8 @@ function renderResults(squad, imported = []) {
   const benchNode = $("#bench");
   benchNode.replaceChildren(...bench.map((p) => playerCard(p, captain.id, vice.id)));
 
+  state.recommendation = { squad: [...squad], starters: [...starters], bench: [...bench], captain, vice };
+
   const totalCost = squad.reduce((sum, p) => sum + p.price, 0);
   const xiProjection = starters.reduce((sum, p) => sum + p.projected, 0) + captain.projected;
   const counts = starters.reduce((acc, p) => ({ ...acc, [p.position]: (acc[p.position] || 0) + 1 }), {});
@@ -292,6 +296,60 @@ function renderResults(squad, imported = []) {
   renderTransfers(imported, squad);
   $("#results").classList.remove("hidden");
   $("#results").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function recommendationText() {
+  const recommendation = state.recommendation;
+  if (!recommendation) return "";
+  const group = (players, position) => players
+    .filter((player) => player.position === position)
+    .map((player) => `${player.name} (${player.team}, £${player.price.toFixed(1)}m)`)
+    .join(", ");
+  const { starters, bench, captain, vice } = recommendation;
+  return [
+    "FPL Optimal XI recommendation",
+    `GK: ${group(starters, "GK")}`,
+    `DEF: ${group(starters, "DEF")}`,
+    `MID: ${group(starters, "MID")}`,
+    `FWD: ${group(starters, "FWD")}`,
+    `Bench: ${bench.map((player) => `${player.name} (${player.position})`).join(", ")}`,
+    `Captain: ${captain.name}`,
+    `Vice-captain: ${vice.name}`,
+    "Review prices, availability, transfer costs and chips on the official FPL site before confirming.",
+  ].join("\n");
+}
+
+async function applyToFpl() {
+  const status = $("#applyStatus");
+  const text = recommendationText();
+  if (!text) {
+    status.textContent = "Optimise a squad first.";
+    status.classList.remove("hidden");
+    return;
+  }
+
+  localStorage.setItem("fplOptimalRecommendation", JSON.stringify({
+    createdAt: new Date().toISOString(),
+    text,
+    playerIds: state.recommendation.squad.map((player) => player.id),
+    captainId: state.recommendation.captain.id,
+    viceCaptainId: state.recommendation.vice.id,
+  }));
+
+  const officialWindow = window.open(FPL_SQUAD_URL, "_blank", "noopener,noreferrer");
+  let copied = false;
+  try {
+    await navigator.clipboard.writeText(text);
+    copied = true;
+  } catch {
+    copied = false;
+  }
+
+  status.textContent = copied
+    ? "Recommendation copied. Review it on the official FPL page before confirming."
+    : "Official FPL opened. Your recommendation remains saved in this browser.";
+  if (!officialWindow) status.textContent += " Allow pop-ups if the FPL page did not open.";
+  status.classList.remove("hidden");
 }
 
 function renderTransfers(importedIds, recommended) {
@@ -429,4 +487,5 @@ $$('.mode-button').forEach((button) => button.addEventListener('click', () => {
 }));
 
 $('#optimiseButton').addEventListener('click', optimise);
+$('#applyToFpl').addEventListener('click', applyToFpl);
 loadData();
