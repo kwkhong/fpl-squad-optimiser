@@ -1,12 +1,13 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { buildTeamModel, projectPlayers } from "../engine.mjs";
 
-const ROOT = "https://raw.githubusercontent.com/vaastav/Fantasy-Premier-League/master/data/2024-25";
+const SEASON = process.env.FPL_BACKTEST_SEASON || "2024-25";
+const EXPORT_CALIBRATION = process.env.FPL_EXPORT_CALIBRATION === "1";
+const ROOT = `https://raw.githubusercontent.com/vaastav/Fantasy-Premier-League/master/data/${SEASON}`;
 const snapshot = JSON.parse(await readFile("data/fpl.json", "utf8"));
-if (snapshot.modelMetrics?.observations > 0) {
-  console.log("Current-season rolling backtest is available; historical fallback not required.");
-  process.exit(0);
-}
+const seedObservations = EXPORT_CALIBRATION
+  ? []
+  : await readFile("data/calibration-observations.json", "utf8").then(JSON.parse).catch(() => []);
 
 async function getText(path) {
   const response = await fetch(`${ROOT}/${path}`, { signal: AbortSignal.timeout(60000) });
@@ -143,6 +144,81 @@ function correlation(left, right) {
   return leftVariance && rightVariance ? covariance / Math.sqrt(leftVariance * rightVariance) : null;
 }
 
+function fitCalibration(rows, position = null, minuteBand = null) {
+  const training = rows.filter((row) =>
+    (!position || row.position === position) &&
+    (minuteBand == null || Math.floor(row.expectedMinutes / 15) === minuteBand)
+  );
+  if (training.length < 80) return null;
+  let best = { loss: Infinity, blend: 1, scale: 1, offset: 0 };
+  for (let blendStep = 0; blendStep <= 10; blendStep += 1) {
+    const blend = blendStep / 10;
+    for (let scaleStep = 10; scaleStep <= 22; scaleStep += 1) {
+      const scale = scaleStep / 20;
+      for (let offsetStep = -15; offsetStep <= 5; offsetStep += 1) {
+        const offset = offsetStep / 10;
+        let error = 0;
+        for (const row of training) {
+          const estimate = Math.max(0, scale * (blend * row.predicted + (1 - blend) * row.baseline) + offset);
+          error += Math.abs(estimate - row.actual);
+        }
+        const loss = error / training.length + 0.003 * (Math.abs(1 - blend) + Math.abs(1 - scale) + Math.abs(offset));
+        if (loss < best.loss) best = { loss, blend, scale, offset };
+      }
+    }
+  }
+  return best;
+}
+
+function calibratedPrediction(row, calibrations) {
+  const calibration = calibrations.get(`${row.position}|${Math.floor(row.expectedMinutes / 15)}`) ||
+    calibrations.get(row.position) || calibrations.get("ALL");
+  if (!calibration) return row.predicted;
+  return Math.max(0, calibration.scale * (
+    calibration.blend * row.predicted + (1 - calibration.blend) * row.baseline
+  ) + calibration.offset);
+}
+
+function median(values) {
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+function fitResidualModel(rows, calibrations) {
+  const groups = new Map();
+  for (const row of rows) {
+    const base = calibratedPrediction(row, calibrations);
+    const minuteBand = Math.floor(row.expectedMinutes / 15);
+    const predictionBand = Math.floor(row.predicted);
+    const keys = [
+      `${row.position}|${minuteBand}|${predictionBand}`,
+      `${row.position}|*|${predictionBand}`,
+      `${row.position}|${minuteBand}|*`,
+    ];
+    for (const key of keys) (groups.get(key) || groups.set(key, []).get(key)).push(row.actual - base);
+  }
+  return new Map([...groups].map(([key, residuals]) => [key, {
+    count: residuals.length,
+    residual: median(residuals),
+  }]));
+}
+
+function ensemblePrediction(row, calibrations, residualModel) {
+  const base = calibratedPrediction(row, calibrations);
+  const minuteBand = Math.floor(row.expectedMinutes / 15);
+  const predictionBand = Math.floor(row.predicted);
+  const keys = [
+    `${row.position}|${minuteBand}|${predictionBand}`,
+    `${row.position}|*|${predictionBand}`,
+    `${row.position}|${minuteBand}|*`,
+  ];
+  const match = keys.map((key) => residualModel.get(key)).find((group) => group?.count >= 20);
+  if (!match) return base;
+  const weight = 0.72 * match.count / (match.count + 35);
+  return Math.max(0, base + weight * match.residual);
+}
+
 const observations = [];
 for (let targetEvent = 4; targetEvent <= 38; targetEvent += 1) {
   const historyByPlayer = {};
@@ -176,16 +252,27 @@ for (let targetEvent = 4; targetEvent <= 38; targetEvent += 1) {
     historyByPlayer,
     teamModel,
   }, 1, "balanced");
+  const currentTraining = observations.filter((row) => row.event >= targetEvent - 8 && row.event < targetEvent);
+  const priorObservations = targetEvent <= 5 && seedObservations.length ? seedObservations : currentTraining;
+  const calibrations = new Map([
+    ["ALL", fitCalibration(priorObservations)],
+    ...["GK", "DEF", "MID", "FWD"].map((position) => [position, fitCalibration(priorObservations, position)]),
+  ]);
+  const residualModel = fitResidualModel(priorObservations, calibrations);
   for (const forecast of forecasts) {
     if (forecast.expectedMinutes < 30) continue;
     const priorRows = historyByPlayer[forecast.id];
     const baseline = priorRows.reduce((value, row) => value + row.total_points, 0) / priorRows.length;
-    observations.push({
+    const observation = {
       event: targetEvent,
+      position: forecast.position,
       predicted: forecast.projected,
       baseline,
+      expectedMinutes: forecast.expectedMinutes,
       actual: actual.get(forecast.id),
-    });
+    };
+    observation.calibrated = ensemblePrediction(observation, calibrations, residualModel);
+    observations.push(observation);
   }
 }
 
@@ -194,19 +281,73 @@ const rmse = Math.sqrt(observations.reduce((value, row) => value + ((row.predict
 const actualRanks = ranks(observations.map((row) => row.actual));
 const metrics = {
   generatedAt: new Date().toISOString(),
-  source: "Vaastav Anand FPL Historical Dataset (2024-25), derived from official FPL data",
+  source: "Vaastav Anand FPL Historical Dataset (2023-24 training; 2024-25 evaluation), derived from official FPL data",
   sourceUrl: "https://github.com/vaastav/Fantasy-Premier-League",
-  method: "Rolling-origin backtest; each GW uses at most the preceding eight GWs",
+  method: "Leakage-safe rolling-origin backtest; prior-season warm start for GWs 4-5, then the preceding eight GWs only",
   population: "Players forecast for at least 30 minutes per fixture",
-  season: "2024-25",
+  season: SEASON,
   events: [4, 38],
   observations: observations.length,
-  mae: mae("predicted"),
-  rmse,
+  mae: mae("calibrated"),
+  rmse: Math.sqrt(observations.reduce((value, row) => value + ((row.calibrated - row.actual) ** 2), 0) / observations.length),
+  structuralMae: mae("predicted"),
+  structuralRmse: rmse,
   baselineMae: mae("baseline"),
-  rankCorrelation: correlation(ranks(observations.map((row) => row.predicted)), actualRanks),
+  rankCorrelation: correlation(ranks(observations.map((row) => row.calibrated)), actualRanks),
+  structuralRankCorrelation: correlation(ranks(observations.map((row) => row.predicted)), actualRanks),
   baselineRankCorrelation: correlation(ranks(observations.map((row) => row.baseline)), actualRanks),
 };
+metrics.relativeMaeImprovement = (metrics.structuralMae - metrics.mae) / metrics.structuralMae;
+
+metrics.diagnostics = Object.fromEntries([
+  ...[4, 6, 8, 10, 12].map((start) => {
+    const window = observations.filter((row) => row.event >= start);
+    const windowMae = (field) => window.reduce((value, row) => value + Math.abs(row[field] - row.actual), 0) / window.length;
+    return [`gw${start}To38`, { observations: window.length, mae: windowMae("calibrated"), structuralMae: windowMae("predicted") }];
+  }),
+  ...["GK", "DEF", "MID", "FWD"].map((position) => {
+    const window = observations.filter((row) => row.position === position);
+    const windowMae = (field) => window.reduce((value, row) => value + Math.abs(row[field] - row.actual), 0) / window.length;
+    return [position, { observations: window.length, mae: windowMae("calibrated"), structuralMae: windowMae("predicted") }];
+  }),
+  ...[30, 45, 60, 70].map((minimumMinutes) => {
+    const window = observations.filter((row) => row.expectedMinutes >= minimumMinutes);
+    const windowMae = (field) => window.reduce((value, row) => value + Math.abs(row[field] - row.actual), 0) / window.length;
+    return [`minutes${minimumMinutes}Plus`, { observations: window.length, mae: windowMae("calibrated"), structuralMae: windowMae("predicted") }];
+  }),
+]);
+
+if (EXPORT_CALIBRATION) {
+  await writeFile("data/calibration-observations.json", JSON.stringify(observations.map((row) => ({
+    event: row.event,
+    position: row.position,
+    predicted: row.predicted,
+    baseline: row.baseline,
+    expectedMinutes: row.expectedMinutes,
+    actual: row.actual,
+  }))));
+  console.log(`Exported ${observations.length} leakage-safe ${SEASON} calibration observations.`);
+  process.exit(0);
+}
+
+const deploymentCalibrations = new Map([
+  ["ALL", fitCalibration(observations)],
+  ...["GK", "DEF", "MID", "FWD"].map((position) => [position, fitCalibration(observations, position)]),
+]);
+const deploymentResiduals = fitResidualModel(observations, deploymentCalibrations);
+snapshot.schemaVersion = 3;
+snapshot.modelVersion = "3.0.0";
+snapshot.predictionCalibration = {
+  version: "3.0.0",
+  trainedSeason: SEASON,
+  method: "Position-specific structural/recent-form ensemble with minutes-conditioned median residual correction",
+  calibrations: Object.fromEntries([...deploymentCalibrations].filter(([, value]) => value)),
+  residuals: Object.fromEntries(deploymentResiduals),
+};
+
+if (metrics.relativeMaeImprovement < 0.05) {
+  throw new Error(`Model v3 MAE improvement ${(metrics.relativeMaeImprovement * 100).toFixed(3)}% did not clear the 5% gate`);
+}
 
 snapshot.historicalModelMetrics = metrics;
 if (!snapshot.modelMetrics?.observations) snapshot.modelMetrics = metrics;
