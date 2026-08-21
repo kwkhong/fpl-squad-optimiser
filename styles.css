@@ -211,3 +211,56 @@ footer { display: flex; justify-content: space-between; padding: 26px 0 36px; bo
   @keyframes reveal { from { opacity: 0; transform: translateY(18px); } }
   @keyframes playerIn { from { opacity: 0; transform: translateY(10px); } }
 }
+
+
+.apply-card {
+  background: linear-gradient(145deg, rgba(17, 73, 54, 0.96), rgba(8, 38, 29, 0.98));
+  color: #f7f4ea;
+}
+
+.apply-card .card-label {
+  color: rgba(247, 244, 234, 0.68);
+}
+
+.apply-copy {
+  margin: 0 0 1rem;
+  color: rgba(247, 244, 234, 0.82);
+  font-size: 0.88rem;
+  line-height: 1.55;
+}
+
+.apply-button {
+  width: 100%;
+  min-height: 50px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border: 1px solid rgba(247, 244, 234, 0.28);
+  border-radius: 12px;
+  padding: 0.8rem 0.95rem;
+  background: #f7f4ea;
+  color: #0d3327;
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 800;
+  cursor: pointer;
+  transition: transform 160ms ease, background 160ms ease;
+}
+
+.apply-button:hover {
+  transform: translateY(-1px);
+  background: #ffffff;
+}
+
+.apply-button:focus-visible {
+  outline: 3px solid #ff7452;
+  outline-offset: 3px;
+}
+
+.apply-status {
+  margin: 0.85rem 0 0;
+  color: rgba(247, 244, 234, 0.82);
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
