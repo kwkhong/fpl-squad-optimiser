@@ -7,7 +7,7 @@ team ID.
 
 ## What it does
 
-- Uses live player prices, form, availability, expected involvement and ICT data
+- Uses official player prices, form, availability, expected involvement and ICT data refreshed automatically every hour
 - Scores the actual next 1, 3 or 5 gameweeks fixture by fixture
 - Adjusts for official fixture difficulty, opponent strength and home/away status
 - Enforces the FPL 2 GK / 5 DEF / 5 MID / 3 FWD squad structure
@@ -15,7 +15,9 @@ team ID.
 - Selects a legal starting formation and captain/vice-captain
 - Supports safe, balanced and differential strategies
 - Imports a public team by FPL ID and proposes up to three changes
-- Falls back to clearly labelled demonstration data if the public feed is blocked
+- Generates a browser-safe FPL snapshot during every deployment and hourly refresh
+- Shows when the deployed dataset was last updated
+- Falls back to clearly labelled demonstration data only if the deployed snapshot is unavailable
 
 ## Run locally
 
@@ -29,8 +31,10 @@ Then open `http://localhost:8080`.
 
 ## Deployment
 
-The included GitHub Pages workflow deploys the site whenever changes reach the
-`main` branch. In repository settings, set **Pages → Source** to **GitHub Actions**.
+The included GitHub Pages workflow downloads and validates the official FPL feeds,
+packages the snapshot with the site, and deploys whenever changes reach `main`. It
+also republishes automatically every hour. In repository settings, set
+**Pages → Source** to **GitHub Actions**.
 
 ## Method note
 
