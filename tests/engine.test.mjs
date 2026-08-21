@@ -41,6 +41,17 @@ test("player projection rewards an easier attacking fixture and exposes uncertai
   assert.ok(easy.ceiling >= easy.projected);
   assert.ok(easy.floor <= easy.projected);
   assert.ok(easy.expectedMinutes > 60);
+
+  const calibrated = projectPlayer(player, {
+    ...base,
+    teamModel: easyModel,
+    predictionCalibration: {
+      calibrations: { MID: { blend: 1, scale: 0.5, offset: 0 } },
+      residuals: {},
+    },
+  }, 1, "balanced");
+  assert.equal(calibrated.structuralProjected, easy.projected);
+  assert.equal(calibrated.projected, Number((easy.projected * 0.5).toFixed(2)));
 });
 
 function makePlayers() {
@@ -95,4 +106,3 @@ test("transfer optimiser includes hit cost and keeps the team when a paid move i
   assert.equal(result.transfers, 0);
   assert.equal(result.hitCost, 0);
 });
-
