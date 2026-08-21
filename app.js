@@ -384,30 +384,37 @@ function demoData() {
   }));
 }
 
+function dataFreshness(updatedAt) {
+  const ageMinutes = Math.max(0, Math.round((Date.now() - new Date(updatedAt).getTime()) / 60000));
+  if (ageMinutes < 2) return "updated just now";
+  if (ageMinutes < 60) return `updated ${ageMinutes}m ago`;
+  const ageHours = Math.round(ageMinutes / 60);
+  return `updated ${ageHours}h ago`;
+}
+
 async function loadData() {
   const status = $("#dataStatus");
   try {
-    const response = await fetch(`${FPL_API}/bootstrap-static/`);
-    if (!response.ok) throw new Error("Live data unavailable");
-    const [data, fixturesResponse] = await Promise.all([
-      response.json(),
-      fetch(`${FPL_API}/fixtures/`).then((fixtureResponse) => {
-        if (!fixtureResponse.ok) throw new Error("Fixture data unavailable");
-        return fixtureResponse.json();
-      }),
-    ]);
+    const response = await fetch(`./data/fpl.json?v=${Date.now()}`, { cache: "no-store" });
+    if (!response.ok) throw new Error("Refreshed FPL data unavailable");
+    const snapshot = await response.json();
+    const data = snapshot.bootstrap;
+    if (!Array.isArray(data?.elements) || !Array.isArray(snapshot.fixtures)) {
+      throw new Error("Invalid FPL data snapshot");
+    }
     data.teams.forEach((team) => state.teams.set(team.id, team));
-    state.fixtures = fixturesResponse;
+    state.fixtures = snapshot.fixtures;
     state.players = data.elements.map(normalisePlayer);
     state.currentEvent = data.events.find((event) => event.is_current)?.id || data.events.find((event) => event.is_next)?.id;
     state.live = true;
     status.className = "data-status live";
-    status.querySelector("span:last-child").textContent = `${state.players.length} live players · ${state.fixtures.length} fixtures · GW ${state.currentEvent || "—"}`;
-  } catch {
+    status.querySelector("span:last-child").textContent = `${state.players.length} live players · ${dataFreshness(snapshot.updatedAt)} · GW ${state.currentEvent || "—"}`;
+  } catch (error) {
+    console.error("FPL snapshot failed to load", error);
     state.players = demoData().map(normalisePlayer);
     state.currentEvent = 1;
     status.className = "data-status fallback";
-    status.querySelector("span:last-child").textContent = "Demo data · live feed blocked";
+    status.querySelector("span:last-child").textContent = "Demo data · refresh unavailable";
   }
 }
 
