@@ -90,7 +90,7 @@ for (const targetEvent of targets) {
   for (const forecast of forecasts) {
     const actual = actualById.get(forecast.id);
     const priorRows = priorHistory[forecast.id] || [];
-    if (!actual || !priorRows.length) continue;
+    if (!actual || !priorRows.length || forecast.expectedMinutes < 30) continue;
     const baseline = priorRows.reduce((total, row) => total + Number(row.total_points || 0), 0) / priorRows.length;
     observations.push({
       event: targetEvent,
@@ -113,6 +113,7 @@ const baselineRanks = ranks(observations.map((row) => row.baseline));
 const metrics = {
   generatedAt: new Date().toISOString(),
   method: "Rolling-origin backtest with no future gameweek player statistics",
+  population: "Players forecast for at least 30 minutes per fixture",
   events: targets,
   observations: observations.length,
   mae: mae("predicted"),
@@ -125,4 +126,3 @@ const metrics = {
 snapshot.modelMetrics = metrics;
 await writeFile("data/fpl.json", JSON.stringify(snapshot));
 console.log(JSON.stringify(metrics, null, 2));
-
