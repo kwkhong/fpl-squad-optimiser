@@ -94,6 +94,17 @@
             <span>Your FPL team ID</span>
             <input id="teamId" type="number" min="1" placeholder="e.g. 123456" inputmode="numeric" />
           </label>
+
+          <label class="field hidden" id="freeTransfersField">
+            <span>Free transfers</span>
+            <select id="freeTransfers">
+              <option value="1" selected>1 free transfer</option>
+              <option value="2">2 free transfers</option>
+              <option value="3">3 free transfers</option>
+              <option value="4">4 free transfers</option>
+              <option value="5">5 free transfers</option>
+            </select>
+          </label>
         </div>
 
         <div class="action-row">
@@ -101,7 +112,7 @@
             <span>Optimise my squad</span>
             <span aria-hidden="true">↗</span>
           </button>
-          <p id="actionHint">Uses hourly-refreshed fixtures, opponent strength, home/away, form and availability.</p>
+          <p id="actionHint">Calibrates expected minutes, xG/xA, clean sheets, bonus and fixture scoring.</p>
         </div>
         <div class="message hidden" id="message" role="status"></div>
       </section>
@@ -167,14 +178,15 @@
         </div>
         <div class="method-copy">
           <p>
-            The model scores every player against their actual upcoming opponents, adjusting
-            for fixture difficulty, opponent attack and defence strength, home advantage,
-            form, expected involvement, clean-sheet potential, likely minutes and availability—
-            while respecting price, position and club limits.
+            The model estimates expected minutes and availability, shrinks noisy xG/xA and
+            bonus rates, derives fixture scoring from a recency-weighted Poisson team model,
+            and prices uncertainty separately from expected points. A deterministic beam search
+            then maximises the legal starting XI, captain and weighted bench—not an arbitrary
+            sum of all 15 players.
           </p>
           <p class="fine-print">
-            Projections use an automatically refreshed official FPL snapshot and are decision support, not certainty.
-            Confirm late team news and predicted line-ups before each deadline.
+            Official FPL data and recent gameweek histories refresh automatically. Transfer mode
+            deducts four-point hits beyond the selected free transfers. Confirm late team news before each deadline.
           </p>
         </div>
       </section>
@@ -198,6 +210,6 @@
       </article>
     </template>
 
-    <script src="app.js?v=20260821-2" defer></script>
+    <script type="module" src="app.js?v=20260821-3"></script>
   </body>
 </html>

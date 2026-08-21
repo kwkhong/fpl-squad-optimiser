@@ -1,9 +1,14 @@
+import {
+  optimiseSquad,
+  optimiseTransfers,
+  pickStartingXI,
+  projectPlayers,
+} from "./engine.mjs";
+
 const FPL_API = "https://fantasy.premierleague.com/api";
 const FPL_SQUAD_URL = "https://fantasy.premierleague.com/en/squad-selection";
 
 const POSITION = { 1: "GK", 2: "DEF", 3: "MID", 4: "FWD" };
-const POSITION_LIMITS = { GK: 2, DEF: 5, MID: 5, FWD: 3 };
-const START_LIMITS = { GK: [1, 1], DEF: [3, 5], MID: [2, 5], FWD: [1, 3] };
 const SHIRT_COLOURS = ["#ef3340", "#79c9f5", "#f7d652", "#ffffff", "#9f7aea", "#ff8c42", "#58b368", "#f2a7c6"];
 
 const state = {
@@ -12,14 +17,18 @@ const state = {
   teams: new Map(),
   currentEvent: null,
   fixtures: [],
+  historyByPlayer: {},
+  predictionCalibration: null,
+  modelMetrics: null,
   live: false,
   importedIds: [],
+  bank: 0,
+  transferPlan: null,
   recommendation: null,
 };
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
-const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const money = (value) => `£${Number(value).toFixed(1)}m`;
 
 function seededNoise(id, seed) {
@@ -52,7 +61,18 @@ function normalisePlayer(player) {
     selectedBy: Number(player.selected_by_percent || 0),
     ict: Number(player.ict_index || 0),
     xgi: Number(player.expected_goal_involvements || 0),
+    expectedGoals: Number(player.expected_goals || 0),
+    expectedAssists: Number(player.expected_assists || 0),
+    goals: Number(player.goals_scored || 0),
+    assists: Number(player.assists || 0),
     cleanSheets: Number(player.clean_sheets || 0),
+    bonus: Number(player.bonus || 0),
+    bps: Number(player.bps || 0),
+    saves: Number(player.saves || 0),
+    yellowCards: Number(player.yellow_cards || 0),
+    redCards: Number(player.red_cards || 0),
+    starts: Number(player.starts || 0),
+    appearances: Number(player.starts || 0) + Number(player.subbed_in || 0),
     minutes: Number(player.minutes || 0),
     chance: player.chance_of_playing_next_round == null ? 100 : Number(player.chance_of_playing_next_round),
     status: player.status || "a",
@@ -79,169 +99,6 @@ function fixtureLabel(player, fixture) {
   return `${opponent?.short_name || "TBC"} (${isHome ? "H" : "A"})`;
 }
 
-function projection(player, horizon, risk) {
-  const availability = clamp(player.chance / 100, 0.08, 1);
-  const minutesConfidence = clamp(player.minutes / 900, 0.35, 1);
-  const nineties = Math.max(player.minutes / 90, 1);
-  const xgiPer90 = player.xgi / nineties;
-  const ictPer90 = player.ict / nineties;
-  const basePerFixture = player.pointsPerGame * 0.52 + player.form * 0.28;
-  const attackingThreat = xgiPer90 * 1.35 + ictPer90 * 0.018;
-  const cleanSheetRate = player.cleanSheets / nineties;
-  const fixtures = upcomingFixtures(player, horizon);
-
-  let score = fixtures.reduce((total, fixture) => {
-    const isHome = fixture.team_h === player.teamId;
-    const opponentId = isHome ? fixture.team_a : fixture.team_h;
-    const opponent = state.teams.get(opponentId) || {};
-    const difficulty = Number(isHome ? fixture.team_h_difficulty : fixture.team_a_difficulty) || 3;
-    const opponentDefence = Number(isHome ? opponent.strength_defence_away : opponent.strength_defence_home) || 1000;
-    const opponentAttack = Number(isHome ? opponent.strength_attack_away : opponent.strength_attack_home) || 1000;
-    const fixtureFactor = clamp(1.26 - (difficulty - 2) * 0.105, 0.72, 1.24);
-    const homeFactor = isHome ? 1.055 : 0.965;
-    const attackMatchup = clamp(1.08 - (opponentDefence - 1000) / 1800, 0.82, 1.18);
-    const cleanSheetMatchup = clamp(1.08 - (opponentAttack - 1000) / 1700, 0.80, 1.20);
-    const defensiveReturn = ["GK", "DEF"].includes(player.position)
-      ? (0.45 + cleanSheetRate * 2.2) * cleanSheetMatchup
-      : 0;
-    return total + (basePerFixture + attackingThreat * attackMatchup + defensiveReturn + 0.35) * fixtureFactor * homeFactor;
-  }, 0);
-
-  if (!fixtures.length) score = (basePerFixture + attackingThreat + 0.35) * Math.pow(Number(horizon), 0.78) * 0.72;
-  score *= availability * (0.72 + minutesConfidence * 0.28);
-  if (player.status === "d") score *= 0.92;
-  if (risk === "safe") score *= 0.92 + Math.min(player.selectedBy, 35) / 350;
-  if (risk === "differential") score *= 1 + Math.max(0, 14 - player.selectedBy) / 115;
-  return Number(score.toFixed(2));
-}
-
-function reserveMinimum(players, remainingCounts, clubCounts) {
-  let minimum = 0;
-  for (const [position, count] of Object.entries(remainingCounts)) {
-    if (count <= 0) continue;
-    const eligible = players
-      .filter((p) => p.position === position && (clubCounts.get(p.teamId) || 0) < 3)
-      .sort((a, b) => a.price - b.price)
-      .slice(0, count);
-    if (eligible.length < count) return Infinity;
-    minimum += eligible.reduce((sum, p) => sum + p.price, 0);
-  }
-  return minimum;
-}
-
-function buildCandidate(players, budget, seed) {
-  const squad = [];
-  const clubCounts = new Map();
-  const counts = { ...POSITION_LIMITS };
-  let spent = 0;
-  const shuffled = players
-    .map((p) => ({ ...p, searchScore: p.projected * (0.93 + seededNoise(p.id, seed) * 0.14) + p.projected / Math.max(p.price, 4) * 0.22 }))
-    .sort((a, b) => b.searchScore - a.searchScore);
-
-  while (squad.length < 15) {
-    let choice = null;
-    let best = -Infinity;
-    for (const player of shuffled) {
-      if (squad.some((p) => p.id === player.id) || counts[player.position] <= 0) continue;
-      if ((clubCounts.get(player.teamId) || 0) >= 3) continue;
-      const nextCounts = { ...counts, [player.position]: counts[player.position] - 1 };
-      const reserve = reserveMinimum(players.filter((p) => !squad.some((s) => s.id === p.id) && p.id !== player.id), nextCounts, new Map(clubCounts).set(player.teamId, (clubCounts.get(player.teamId) || 0) + 1));
-      if (spent + player.price + reserve > budget + 0.001) continue;
-      const affordability = player.projected / Math.pow(player.price, 0.18);
-      if (affordability > best) { best = affordability; choice = player; }
-    }
-    if (!choice) return null;
-    squad.push(choice);
-    counts[choice.position] -= 1;
-    clubCounts.set(choice.teamId, (clubCounts.get(choice.teamId) || 0) + 1);
-    spent += choice.price;
-  }
-  return improveSquad(squad, players, budget);
-}
-
-function buildCheapestLegalSquad(players, budget) {
-  const squad = [];
-  const clubCounts = new Map();
-  for (const position of ["GK", "DEF", "MID", "FWD"]) {
-    const candidates = players
-      .filter((player) => player.position === position)
-      .sort((a, b) => a.price - b.price || b.projected - a.projected);
-    while (squad.filter((player) => player.position === position).length < POSITION_LIMITS[position]) {
-      const choice = candidates.find((player) =>
-        !squad.some((picked) => picked.id === player.id) &&
-        (clubCounts.get(player.teamId) || 0) < 3
-      );
-      if (!choice) return null;
-      squad.push(choice);
-      clubCounts.set(choice.teamId, (clubCounts.get(choice.teamId) || 0) + 1);
-    }
-  }
-  const spend = squad.reduce((sum, player) => sum + player.price, 0);
-  return spend <= budget + 0.001 ? improveSquad(squad, players, budget) : null;
-}
-
-function improveSquad(squad, pool, budget) {
-  let current = [...squad];
-  let improved = true;
-  let loops = 0;
-  while (improved && loops < 30) {
-    improved = false;
-    loops += 1;
-    const spent = current.reduce((sum, p) => sum + p.price, 0);
-    const clubCounts = current.reduce((map, p) => map.set(p.teamId, (map.get(p.teamId) || 0) + 1), new Map());
-    let bestSwap = null;
-    for (const outgoing of current) {
-      for (const incoming of pool) {
-        if (incoming.position !== outgoing.position || current.some((p) => p.id === incoming.id)) continue;
-        if (spent - outgoing.price + incoming.price > budget + 0.001) continue;
-        const sameClub = incoming.teamId === outgoing.teamId;
-        if (!sameClub && (clubCounts.get(incoming.teamId) || 0) >= 3) continue;
-        const gain = incoming.projected - outgoing.projected;
-        if (gain > 0.02 && (!bestSwap || gain > bestSwap.gain)) bestSwap = { outgoing, incoming, gain };
-      }
-    }
-    if (bestSwap) {
-      current = current.map((p) => p.id === bestSwap.outgoing.id ? bestSwap.incoming : p);
-      improved = true;
-    }
-  }
-  return current;
-}
-
-function optimiseSquad(players, budget) {
-  let best = null;
-  const available = players.filter((p) => p.status !== "u" && p.chance >= 25 && p.price <= budget - 52);
-  const baseline = buildCheapestLegalSquad(available, budget);
-  if (baseline) best = { squad: baseline, score: baseline.reduce((sum, player) => sum + player.projected, 0) };
-  for (let seed = 1; seed <= 140; seed += 1) {
-    const candidate = buildCandidate(available, budget, seed);
-    if (!candidate) continue;
-    const score = candidate.reduce((sum, p) => sum + p.projected, 0);
-    if (!best || score > best.score) best = { squad: candidate, score };
-  }
-  return best?.squad || null;
-}
-
-function pickStartingXI(squad) {
-  const byPosition = Object.groupBy
-    ? Object.groupBy(squad, (p) => p.position)
-    : squad.reduce((acc, p) => ((acc[p.position] ||= []).push(p), acc), {});
-  Object.values(byPosition).forEach((group) => group.sort((a, b) => b.projected - a.projected));
-  const starters = [byPosition.GK[0], ...byPosition.DEF.slice(0, 3), ...byPosition.MID.slice(0, 2), ...byPosition.FWD.slice(0, 1)];
-  const remainingSlots = 11 - starters.length;
-  const optional = [...byPosition.DEF.slice(3), ...byPosition.MID.slice(2), ...byPosition.FWD.slice(1)]
-    .sort((a, b) => b.projected - a.projected)
-    .slice(0, remainingSlots);
-  starters.push(...optional);
-  const starterIds = new Set(starters.map((p) => p.id));
-  const bench = squad.filter((p) => !starterIds.has(p.id)).sort((a, b) => {
-    if (a.position === "GK") return -1;
-    if (b.position === "GK") return 1;
-    return b.projected - a.projected;
-  });
-  return { starters, bench };
-}
-
 function playerCard(player, captainId, viceId) {
   const card = $("#playerTemplate").content.firstElementChild.cloneNode(true);
   card.style.setProperty("--shirt", teamColour(player.teamId));
@@ -251,7 +108,7 @@ function playerCard(player, captainId, viceId) {
   card.querySelector(".captain-badge").classList.toggle("hidden", player.id !== captainId);
   card.querySelector(".vice-badge").classList.toggle("hidden", player.id !== viceId);
   const run = upcomingFixtures(player, Number($("#horizon").value)).map((fixture) => fixtureLabel(player, fixture)).join(", ");
-  card.title = `${player.name}: form ${player.form.toFixed(1)}, ${player.selectedBy.toFixed(1)}% owned · ${run || "No scheduled fixture"}`;
+  card.title = `${player.name}: ${player.expectedMinutes.toFixed(0)} expected minutes/fixture · range ${player.floor.toFixed(1)}–${player.ceiling.toFixed(1)} · ${run || "No scheduled fixture"}`;
   return card;
 }
 
@@ -285,7 +142,7 @@ function renderResults(squad, imported = []) {
   const value = [...squad].sort((a, b) => (b.projected / b.price) - (a.projected / a.price))[0];
   const differential = [...squad].filter((p) => p.selectedBy < 10).sort((a, b) => b.projected - a.projected)[0];
   const reasonItems = [
-    `${captain.name} leads the model on projected return and earns the armband.`,
+    `${captain.name} leads the expected-points model and earns the armband (${captain.floor.toFixed(1)}–${captain.ceiling.toFixed(1)} range).`,
     `${value.name} is the strongest value pick at ${money(value.price)}.`,
     differential ? `${differential.name} adds upside at only ${differential.selectedBy.toFixed(1)}% ownership.` : `${premium.name} anchors the squad's premium allocation.`,
   ];
@@ -293,7 +150,7 @@ function renderResults(squad, imported = []) {
     const li = document.createElement("li"); li.textContent = text; return li;
   }));
 
-  renderTransfers(imported, squad);
+  renderTransfers(imported, squad, state.transferPlan);
   $("#results").classList.remove("hidden");
   $("#results").scrollIntoView({ behavior: "smooth", block: "start" });
 }
@@ -352,7 +209,7 @@ async function applyToFpl() {
   status.classList.remove("hidden");
 }
 
-function renderTransfers(importedIds, recommended) {
+function renderTransfers(importedIds, recommended, plan = null) {
   const card = $("#transferCard");
   if (!importedIds.length) { card.classList.add("hidden"); return; }
   const current = importedIds.map((id) => state.players.find((p) => p.id === id)).filter(Boolean);
@@ -360,10 +217,12 @@ function renderTransfers(importedIds, recommended) {
   const outgoing = current.filter((p) => !recommendedIds.has(p.id)).sort((a, b) => a.projected - b.projected);
   const currentIds = new Set(current.map((p) => p.id));
   const incoming = recommended.filter((p) => !currentIds.has(p.id)).sort((a, b) => b.projected - a.projected);
-  const moves = outgoing.slice(0, 3).map((out, index) => {
-    const samePosition = incoming.filter((p) => p.position === out.position);
-    return { out, in: samePosition[0] || incoming[index] };
-  }).filter((move) => move.in);
+  const remainingIncoming = [...incoming];
+  const moves = outgoing.slice(0, 3).map((out) => {
+    const matchIndex = remainingIncoming.findIndex((player) => player.position === out.position);
+    if (matchIndex < 0) return null;
+    return { out, in: remainingIncoming.splice(matchIndex, 1)[0] };
+  }).filter(Boolean);
   if (!moves.length) {
     $("#transferList").innerHTML = "<p class='fine-print'>Your squad is already very close to the model's recommendation.</p>";
   } else {
@@ -374,18 +233,28 @@ function renderTransfers(importedIds, recommended) {
       return row;
     }));
   }
+  if (plan?.hitCost > 0) {
+    const warning = document.createElement("p");
+    warning.className = "fine-print transfer-cost";
+    warning.textContent = `Net projection includes a ${plan.hitCost}-point transfer hit.`;
+    $("#transferList").append(warning);
+  }
   card.classList.remove("hidden");
 }
 
 async function loadCurrentTeam(teamId) {
   if (!state.currentEvent) throw new Error("The current gameweek could not be identified.");
-  const response = await fetch(`${FPL_API}/entry/${teamId}/event/${state.currentEvent}/picks/`);
-  if (!response.ok) throw new Error("That team could not be loaded. Check the ID and try again.");
-  const data = await response.json();
+  const candidates = [...new Set([state.currentEvent, Math.max(1, state.currentEvent - 1)])];
+  let data = null;
+  for (const event of candidates) {
+    const response = await fetch(`${FPL_API}/entry/${teamId}/event/${event}/picks/`);
+    if (response.ok) { data = await response.json(); break; }
+  }
+  if (!data) throw new Error("That public team could not be loaded. Check the ID and try again.");
   state.importedIds = data.picks.map((pick) => pick.element);
-  const bank = Number(data.entry_history?.bank || 0) / 10;
+  state.bank = Number(data.entry_history?.bank || 0) / 10;
   const value = Number(data.entry_history?.value || 1000) / 10;
-  $("#budget").value = (value + bank).toFixed(1);
+  $("#budget").value = (value + state.bank).toFixed(1);
   return state.importedIds;
 }
 
@@ -394,23 +263,48 @@ async function optimise() {
   const message = $("#message");
   message.classList.add("hidden");
   button.disabled = true;
-  button.querySelector("span:first-child").textContent = "Searching combinations…";
+  button.querySelector("span:first-child").textContent = "Running calibrated model…";
   await new Promise((resolve) => setTimeout(resolve, 40));
   try {
     const horizon = Number($("#horizon").value);
     const risk = $("#risk").value;
-    let budget = Number($("#budget").value);
+    const budget = Number($("#budget").value);
+    if (!Number.isFinite(budget) || budget < 64 || budget > 130) {
+      throw new Error("Enter a valid squad budget between £64m and £130m.");
+    }
+
     if (state.mode === "transfers") {
       const teamId = Number($("#teamId").value);
       if (!teamId) throw new Error("Enter your FPL team ID to analyse transfers.");
       await loadCurrentTeam(teamId);
-      budget = Number($("#budget").value);
     } else {
       state.importedIds = [];
+      state.bank = 0;
     }
-    const scored = state.players.map((p) => ({ ...p, projected: projection(p, horizon, risk) }));
+
+    const scored = projectPlayers(state.players, {
+      fixtures: state.fixtures,
+      teams: state.teams,
+      currentEvent: state.currentEvent,
+      historyByPlayer: state.historyByPlayer,
+      predictionCalibration: state.predictionCalibration,
+    }, horizon, risk);
     state.players = scored;
-    const squad = optimiseSquad(scored, budget);
+
+    let squad;
+    state.transferPlan = null;
+    if (state.mode === "transfers") {
+      const currentSquad = state.importedIds
+        .map((id) => scored.find((player) => player.id === id))
+        .filter(Boolean);
+      if (currentSquad.length !== 15) throw new Error("The imported public squad is incomplete for this gameweek.");
+      const freeTransfers = Number($("#freeTransfers").value || 1);
+      state.transferPlan = optimiseTransfers(currentSquad, scored, state.bank, freeTransfers, 3);
+      squad = state.transferPlan?.squad;
+    } else {
+      squad = optimiseSquad(scored, budget);
+    }
+
     if (!squad) throw new Error("No legal squad was found at this budget. Try increasing it slightly.");
     renderResults(squad, state.importedIds);
   } catch (error) {
@@ -462,15 +356,26 @@ async function loadData() {
     }
     data.teams.forEach((team) => state.teams.set(team.id, team));
     state.fixtures = snapshot.fixtures;
+    state.historyByPlayer = snapshot.historyByPlayer || {};
+    state.predictionCalibration = snapshot.predictionCalibration || null;
+    state.modelMetrics = snapshot.modelMetrics || null;
     state.players = data.elements.map(normalisePlayer);
     state.currentEvent = data.events.find((event) => event.is_current)?.id || data.events.find((event) => event.is_next)?.id;
     state.live = true;
     status.className = "data-status live";
-    status.querySelector("span:last-child").textContent = `${state.players.length} live players · ${dataFreshness(snapshot.updatedAt)} · GW ${state.currentEvent || "—"}`;
+    const validation = state.modelMetrics?.rankCorrelation != null ? ` · backtest ρ ${Number(state.modelMetrics.rankCorrelation).toFixed(2)}` : "";
+    status.querySelector("span:last-child").textContent = `${state.players.length} live players · ${dataFreshness(snapshot.updatedAt)} · GW ${state.currentEvent || "—"}${validation}`;
   } catch (error) {
     console.error("FPL snapshot failed to load", error);
     state.players = demoData().map(normalisePlayer);
     state.currentEvent = 1;
+    state.fixtures = Array.from({ length: 10 }, (_, index) => ({
+      id: index + 1,
+      event: 1,
+      finished: false,
+      team_h: index + 1,
+      team_a: 20 - index,
+    }));
     status.className = "data-status fallback";
     status.querySelector("span:last-child").textContent = "Demo data · refresh unavailable";
   }
@@ -480,10 +385,11 @@ $$('.mode-button').forEach((button) => button.addEventListener('click', () => {
   state.mode = button.dataset.mode;
   $$('.mode-button').forEach((item) => item.classList.toggle('active', item === button));
   $('#teamIdField').classList.toggle('hidden', state.mode !== 'transfers');
+  $('#freeTransfersField').classList.toggle('hidden', state.mode !== 'transfers');
   $('#optimiseButton span:first-child').textContent = state.mode === 'new' ? 'Optimise my squad' : 'Plan my transfers';
   $('#actionHint').textContent = state.mode === 'new'
-    ? 'Uses current price, form, expected involvement and availability.'
-    : 'Imports your latest public squad and ranks up to three upgrades.';
+    ? 'Calibrates expected minutes, xG/xA, clean sheets, bonus and fixture scoring.'
+    : 'Optimises up to three transfers after free-transfer and hit costs.';
 }));
 
 $('#optimiseButton').addEventListener('click', optimise);
