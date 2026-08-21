@@ -27,8 +27,14 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Download and validate official FPL data
+      - name: Download official FPL data and recent histories
         run: node scripts/update-fpl-data.mjs
+
+      - name: Run rolling-origin model backtest
+        run: node scripts/backtest-model.mjs
+
+      - name: Test prediction and optimisation engine
+        run: node --test tests/*.test.mjs
 
   deploy:
     if: github.event_name != 'pull_request'
@@ -44,8 +50,10 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Create deployable FPL snapshot
-        run: node scripts/update-fpl-data.mjs
+      - name: Create and backtest deployable FPL snapshot
+        run: |
+          node scripts/update-fpl-data.mjs
+          node scripts/backtest-model.mjs
 
       - uses: actions/configure-pages@v5
         with:
