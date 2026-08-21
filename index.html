@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0d1f1a" />
+    <meta
+      name="description"
+      content="Build a legal Fantasy Premier League squad, rank transfers and choose your captain using live FPL data."
+    />
+    <meta property="og:title" content="FPL Optimal XI" />
+    <meta
+      property="og:description"
+      content="A clean, explainable FPL squad and transfer optimiser."
+    />
+    <title>FPL Optimal XI</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="noise" aria-hidden="true"></div>
+    <header class="topbar">
+      <a class="brand" href="#top" aria-label="FPL Optimal XI home">
+        <span class="brand-mark">XI</span>
+        <span>FPL Optimal</span>
+      </a>
+      <div class="data-status" id="dataStatus">
+        <span class="status-dot" aria-hidden="true"></span>
+        <span>Loading live FPL data…</span>
+      </div>
+    </header>
+
+    <main id="top">
+      <section class="hero">
+        <div class="eyebrow">Decision support for every gameweek</div>
+        <h1>Turn £100m<br />into <em>points.</em></h1>
+        <p class="hero-copy">
+          Build a legal 15-player squad, identify the strongest starting XI and
+          make the captaincy call with a projection you can actually understand.
+        </p>
+        <div class="hero-metrics" aria-label="FPL squad constraints">
+          <div><strong>15</strong><span>players</span></div>
+          <div><strong>£100m</strong><span>budget</span></div>
+          <div><strong>3</strong><span>per club</span></div>
+        </div>
+      </section>
+
+      <section class="control-panel" aria-labelledby="control-title">
+        <div class="panel-heading">
+          <div>
+            <p class="section-index">01 / Strategy</p>
+            <h2 id="control-title">Set your brief</h2>
+          </div>
+          <div class="mode-switch" role="group" aria-label="Optimisation mode">
+            <button class="mode-button active" data-mode="new" type="button">New squad</button>
+            <button class="mode-button" data-mode="transfers" type="button">My transfers</button>
+          </div>
+        </div>
+
+        <div class="controls-grid">
+          <label class="field">
+            <span>Available budget</span>
+            <div class="money-input">
+              <span>£</span>
+              <input id="budget" type="number" min="75" max="130" step="0.1" value="100.0" />
+              <span>m</span>
+            </div>
+          </label>
+
+          <label class="field">
+            <span>Planning horizon</span>
+            <select id="horizon">
+              <option value="1">Next gameweek</option>
+              <option value="3" selected>Next 3 gameweeks</option>
+              <option value="5">Next 5 gameweeks</option>
+            </select>
+          </label>
+
+          <label class="field">
+            <span>Risk appetite</span>
+            <select id="risk">
+              <option value="safe">Safe — minutes & form</option>
+              <option value="balanced" selected>Balanced</option>
+              <option value="differential">Differential — low ownership</option>
+            </select>
+          </label>
+
+          <label class="field team-id-field hidden" id="teamIdField">
+            <span>Your FPL team ID</span>
+            <input id="teamId" type="number" min="1" placeholder="e.g. 123456" inputmode="numeric" />
+          </label>
+        </div>
+
+        <div class="action-row">
+          <button class="primary-button" id="optimiseButton" type="button">
+            <span>Optimise my squad</span>
+            <span aria-hidden="true">↗</span>
+          </button>
+          <p id="actionHint">Uses current price, form, expected involvement and availability.</p>
+        </div>
+        <div class="message hidden" id="message" role="status"></div>
+      </section>
+
+      <section class="results hidden" id="results" aria-live="polite">
+        <div class="results-header">
+          <div>
+            <p class="section-index">02 / Recommendation</p>
+            <h2>Your optimal squad</h2>
+          </div>
+          <div class="summary-strip">
+            <div><span>Squad cost</span><strong id="totalCost">—</strong></div>
+            <div><span>Projected XI</span><strong id="projectedPoints">—</strong></div>
+            <div><span>Formation</span><strong id="formation">—</strong></div>
+          </div>
+        </div>
+
+        <div class="result-layout">
+          <div class="pitch-card">
+            <div class="pitch" id="pitch" aria-label="Recommended starting eleven"></div>
+            <div class="bench">
+              <div class="bench-title"><span>Bench</span><small>ordered left to right</small></div>
+              <div class="bench-players" id="bench"></div>
+            </div>
+          </div>
+
+          <aside class="insight-column">
+            <article class="insight-card captain-card">
+              <p class="card-label">Captaincy</p>
+              <div id="captainPanel"></div>
+            </article>
+
+            <article class="insight-card">
+              <p class="card-label">Why this squad</p>
+              <ul class="reason-list" id="reasonList"></ul>
+            </article>
+
+            <article class="insight-card transfer-card hidden" id="transferCard">
+              <p class="card-label">Best moves</p>
+              <div id="transferList"></div>
+            </article>
+          </aside>
+        </div>
+      </section>
+
+      <section class="method-section">
+        <div>
+          <p class="section-index">03 / Method</p>
+          <h2>Strong picks.<br />Visible logic.</h2>
+        </div>
+        <div class="method-copy">
+          <p>
+            The model converts live FPL indicators into a forward score, then searches
+            thousands of legal squad combinations. It rewards form, attacking threat,
+            clean-sheet potential and likely minutes—while respecting price, position
+            and club limits.
+          </p>
+          <p class="fine-print">
+            Projections are decision support, not certainty. Late injury news, rotation
+            and fixture changes can materially affect the recommendation.
+          </p>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <span>FPL Optimal XI</span>
+      <span>Independent tool · Not affiliated with the Premier League</span>
+    </footer>
+
+    <template id="playerTemplate">
+      <article class="player-card">
+        <div class="shirt" aria-hidden="true"></div>
+        <div class="player-copy">
+          <strong class="player-name"></strong>
+          <span class="player-team"></span>
+        </div>
+        <div class="player-score"></div>
+        <span class="badge captain-badge hidden">C</span>
+        <span class="badge vice-badge hidden">V</span>
+      </article>
+    </template>
+
+    <script src="app.js" defer></script>
+  </body>
+</html>
