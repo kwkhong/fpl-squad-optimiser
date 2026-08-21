@@ -147,6 +147,28 @@ function strategyScore(projected, uncertainty, reliability, selectedBy, risk) {
   return projected;
 }
 
+function applyPredictionCalibration(row, model) {
+  if (!model?.calibrations || row.expectedMinutes < 30) return row.predicted;
+  const minuteBand = Math.floor(row.expectedMinutes / 15);
+  const calibration = model.calibrations[`${row.position}|${minuteBand}`] ||
+    model.calibrations[row.position] || model.calibrations.ALL;
+  if (!calibration) return row.predicted;
+  const base = Math.max(0, number(calibration.scale, 1) * (
+    number(calibration.blend, 1) * row.predicted +
+    (1 - number(calibration.blend, 1)) * row.baseline
+  ) + number(calibration.offset));
+  const predictionBand = Math.floor(row.predicted);
+  const keys = [
+    `${row.position}|${minuteBand}|${predictionBand}`,
+    `${row.position}|*|${predictionBand}`,
+    `${row.position}|${minuteBand}|*`,
+  ];
+  const match = keys.map((key) => model.residuals?.[key]).find((group) => number(group?.count) >= 20);
+  if (!match) return base;
+  const weight = 0.72 * number(match.count) / (number(match.count) + 35);
+  return Math.max(0, base + weight * number(match.residual));
+}
+
 export function projectPlayer(player, context, horizon = 3, risk = "balanced") {
   const currentEvent = number(context.currentEvent, 1);
   const fixtures = context.fixtures
@@ -208,12 +230,25 @@ export function projectPlayer(player, context, horizon = 3, risk = "balanced") {
     });
   }
 
+  const structuralProjected = projected;
+  if (fixtures.length && context.predictionCalibration) {
+    const baseline = history.length
+      ? sum(history.map((row) => number(row.total_points))) / history.length
+      : number(player.pointsPerGame, 2.5);
+    projected = applyPredictionCalibration({
+      position: player.position,
+      predicted: structuralProjected / fixtures.length,
+      baseline,
+      expectedMinutes: minuteModel.expected,
+    }, context.predictionCalibration) * fixtures.length;
+  }
   const uncertainty = recentSpread * Math.sqrt(Math.max(fixtures.length, 1)) * (1.08 - 0.38 * minuteModel.reliability);
   if (!fixtures.length) projected = 0;
   projected = Number(projected.toFixed(2));
   return {
     ...player,
     projected,
+    structuralProjected: Number(structuralProjected.toFixed(2)),
     selectionScore: Number(strategyScore(projected, uncertainty, minuteModel.reliability, player.selectedBy, risk).toFixed(3)),
     floor: Number(Math.max(0, projected - uncertainty).toFixed(1)),
     ceiling: Number((projected + uncertainty).toFixed(1)),
