@@ -18,6 +18,7 @@ const state = {
   currentEvent: null,
   fixtures: [],
   historyByPlayer: {},
+  predictionCalibration: null,
   modelMetrics: null,
   live: false,
   importedIds: [],
@@ -286,6 +287,7 @@ async function optimise() {
       teams: state.teams,
       currentEvent: state.currentEvent,
       historyByPlayer: state.historyByPlayer,
+      predictionCalibration: state.predictionCalibration,
     }, horizon, risk);
     state.players = scored;
 
@@ -355,6 +357,7 @@ async function loadData() {
     data.teams.forEach((team) => state.teams.set(team.id, team));
     state.fixtures = snapshot.fixtures;
     state.historyByPlayer = snapshot.historyByPlayer || {};
+    state.predictionCalibration = snapshot.predictionCalibration || null;
     state.modelMetrics = snapshot.modelMetrics || null;
     state.players = data.elements.map(normalisePlayer);
     state.currentEvent = data.events.find((event) => event.is_current)?.id || data.events.find((event) => event.is_next)?.id;
