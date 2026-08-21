@@ -10,6 +10,7 @@ const state = {
   players: [],
   teams: new Map(),
   currentEvent: null,
+  fixtures: [],
   live: false,
   importedIds: [],
 };
@@ -35,6 +36,12 @@ function normalisePlayer(player) {
     name: player.web_name || player.name,
     teamId: player.team,
     team: team.short_name || team.name,
+    teamStrength: {
+      attackHome: Number(team.strength_attack_home || 1000),
+      attackAway: Number(team.strength_attack_away || 1000),
+      defenceHome: Number(team.strength_defence_home || 1000),
+      defenceAway: Number(team.strength_defence_away || 1000),
+    },
     position: POSITION[player.element_type] || player.position,
     price: player.now_cost ? player.now_cost / 10 : Number(player.price),
     form: Number(player.form || 0),
@@ -51,15 +58,56 @@ function normalisePlayer(player) {
   };
 }
 
+function upcomingFixtures(player, horizon) {
+  return state.fixtures
+    .filter((fixture) =>
+      !fixture.finished &&
+      fixture.event != null &&
+      fixture.event >= state.currentEvent &&
+      fixture.event < state.currentEvent + Number(horizon) &&
+      (fixture.team_h === player.teamId || fixture.team_a === player.teamId)
+    )
+    .sort((a, b) => a.event - b.event);
+}
+
+function fixtureLabel(player, fixture) {
+  const isHome = fixture.team_h === player.teamId;
+  const opponentId = isHome ? fixture.team_a : fixture.team_h;
+  const opponent = state.teams.get(opponentId);
+  return `${opponent?.short_name || "TBC"} (${isHome ? "H" : "A"})`;
+}
+
 function projection(player, horizon, risk) {
   const availability = clamp(player.chance / 100, 0.08, 1);
   const minutesConfidence = clamp(player.minutes / 900, 0.35, 1);
-  const base = player.pointsPerGame * 0.45 + player.form * 0.33;
-  const threat = player.xgi * 0.075 + player.ict * 0.0025;
-  const defence = ["GK", "DEF"].includes(player.position) ? player.cleanSheets * 0.035 : 0;
-  const horizonLift = Math.pow(Number(horizon), 0.78);
-  let score = (base + threat + defence + 0.55) * availability * (0.75 + minutesConfidence * 0.25) * horizonLift;
+  const nineties = Math.max(player.minutes / 90, 1);
+  const xgiPer90 = player.xgi / nineties;
+  const ictPer90 = player.ict / nineties;
+  const basePerFixture = player.pointsPerGame * 0.52 + player.form * 0.28;
+  const attackingThreat = xgiPer90 * 1.35 + ictPer90 * 0.018;
+  const cleanSheetRate = player.cleanSheets / nineties;
+  const fixtures = upcomingFixtures(player, horizon);
 
+  let score = fixtures.reduce((total, fixture) => {
+    const isHome = fixture.team_h === player.teamId;
+    const opponentId = isHome ? fixture.team_a : fixture.team_h;
+    const opponent = state.teams.get(opponentId) || {};
+    const difficulty = Number(isHome ? fixture.team_h_difficulty : fixture.team_a_difficulty) || 3;
+    const opponentDefence = Number(isHome ? opponent.strength_defence_away : opponent.strength_defence_home) || 1000;
+    const opponentAttack = Number(isHome ? opponent.strength_attack_away : opponent.strength_attack_home) || 1000;
+    const fixtureFactor = clamp(1.26 - (difficulty - 2) * 0.105, 0.72, 1.24);
+    const homeFactor = isHome ? 1.055 : 0.965;
+    const attackMatchup = clamp(1.08 - (opponentDefence - 1000) / 1800, 0.82, 1.18);
+    const cleanSheetMatchup = clamp(1.08 - (opponentAttack - 1000) / 1700, 0.80, 1.20);
+    const defensiveReturn = ["GK", "DEF"].includes(player.position)
+      ? (0.45 + cleanSheetRate * 2.2) * cleanSheetMatchup
+      : 0;
+    return total + (basePerFixture + attackingThreat * attackMatchup + defensiveReturn + 0.35) * fixtureFactor * homeFactor;
+  }, 0);
+
+  if (!fixtures.length) score = (basePerFixture + attackingThreat + 0.35) * Math.pow(Number(horizon), 0.78) * 0.72;
+  score *= availability * (0.72 + minutesConfidence * 0.28);
+  if (player.status === "d") score *= 0.92;
   if (risk === "safe") score *= 0.92 + Math.min(player.selectedBy, 35) / 350;
   if (risk === "differential") score *= 1 + Math.max(0, 14 - player.selectedBy) / 115;
   return Number(score.toFixed(2));
@@ -200,7 +248,8 @@ function playerCard(player, captainId, viceId) {
   card.querySelector(".player-score").textContent = `${player.projected.toFixed(1)} pts`;
   card.querySelector(".captain-badge").classList.toggle("hidden", player.id !== captainId);
   card.querySelector(".vice-badge").classList.toggle("hidden", player.id !== viceId);
-  card.title = `${player.name}: form ${player.form.toFixed(1)}, ${player.selectedBy.toFixed(1)}% owned`;
+  const run = upcomingFixtures(player, Number($("#horizon").value)).map((fixture) => fixtureLabel(player, fixture)).join(", ");
+  card.title = `${player.name}: form ${player.form.toFixed(1)}, ${player.selectedBy.toFixed(1)}% owned · ${run || "No scheduled fixture"}`;
   return card;
 }
 
@@ -340,13 +389,20 @@ async function loadData() {
   try {
     const response = await fetch(`${FPL_API}/bootstrap-static/`);
     if (!response.ok) throw new Error("Live data unavailable");
-    const data = await response.json();
+    const [data, fixturesResponse] = await Promise.all([
+      response.json(),
+      fetch(`${FPL_API}/fixtures/`).then((fixtureResponse) => {
+        if (!fixtureResponse.ok) throw new Error("Fixture data unavailable");
+        return fixtureResponse.json();
+      }),
+    ]);
     data.teams.forEach((team) => state.teams.set(team.id, team));
+    state.fixtures = fixturesResponse;
     state.players = data.elements.map(normalisePlayer);
     state.currentEvent = data.events.find((event) => event.is_current)?.id || data.events.find((event) => event.is_next)?.id;
     state.live = true;
     status.className = "data-status live";
-    status.querySelector("span:last-child").textContent = `${state.players.length} live players · GW ${state.currentEvent || "—"}`;
+    status.querySelector("span:last-child").textContent = `${state.players.length} live players · ${state.fixtures.length} fixtures · GW ${state.currentEvent || "—"}`;
   } catch {
     state.players = demoData().map(normalisePlayer);
     state.currentEvent = 1;

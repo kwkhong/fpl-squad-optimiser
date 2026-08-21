@@ -8,6 +8,8 @@ team ID.
 ## What it does
 
 - Uses live player prices, form, availability, expected involvement and ICT data
+- Scores the actual next 1, 3 or 5 gameweeks fixture by fixture
+- Adjusts for official fixture difficulty, opponent strength and home/away status
 - Enforces the FPL 2 GK / 5 DEF / 5 MID / 3 FWD squad structure
 - Enforces the three-player-per-club rule and user-defined budget
 - Selects a legal starting formation and captain/vice-captain
@@ -32,6 +34,9 @@ The included GitHub Pages workflow deploys the site whenever changes reach the
 
 ## Method note
 
-The optimiser uses repeated constrained search plus local player swaps. It is a
-decision-support projection, not a guarantee of future points. Review late injury,
-rotation and fixture news before locking a team.
+The optimiser uses repeated constrained search plus local player swaps. Player
+scores are calculated fixture by fixture from the official FPL player and fixture
+feeds, including opponent attack/defence strength, fixture difficulty and home/away
+status. It is decision support, not a guarantee of future points. Predicted line-ups
+and betting odds are not included because the app has no reliable, free, browser-safe
+source for them; review late team news before locking a team.
