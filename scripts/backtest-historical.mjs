@@ -177,6 +177,7 @@ for (let targetEvent = 4; targetEvent <= 38; targetEvent += 1) {
     teamModel,
   }, 1, "balanced");
   for (const forecast of forecasts) {
+    if (forecast.expectedMinutes < 30) continue;
     const priorRows = historyByPlayer[forecast.id];
     const baseline = priorRows.reduce((value, row) => value + row.total_points, 0) / priorRows.length;
     observations.push({
@@ -196,6 +197,7 @@ const metrics = {
   source: "Vaastav Anand FPL Historical Dataset (2024-25), derived from official FPL data",
   sourceUrl: "https://github.com/vaastav/Fantasy-Premier-League",
   method: "Rolling-origin backtest; each GW uses at most the preceding eight GWs",
+  population: "Players forecast for at least 30 minutes per fixture",
   season: "2024-25",
   events: [4, 38],
   observations: observations.length,
