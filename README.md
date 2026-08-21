@@ -48,7 +48,8 @@ improvement and scores the XI, captain and likely autosub value.
 
 The deployment workflow backtests the model on the most recent eligible gameweeks
 using only player statistics available before each predicted gameweek. It records MAE,
-RMSE and rank correlation alongside a rolling-points baseline. Until 2026/27 has enough
+RMSE and rank correlation alongside a rolling-points baseline for players expected to
+play at least 30 minutes per fixture. Until 2026/27 has enough
 completed gameweeks, validation falls back to a rolling 2024/25 test from the
 [Vaastav Anand FPL Historical Dataset](https://github.com/vaastav/Fantasy-Premier-League),
 which is derived from official FPL data and distributed under its repository licence.
