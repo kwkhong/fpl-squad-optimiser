@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="FPL Optimal XI icon">
+  <rect width="1024" height="1024" rx="224" fill="#0d1f1a"/>
+  <circle cx="792" cy="232" r="88" fill="#ff6f47"/>
+  <path d="M190 720 406 304h108L298 720zm310 0 216-416h108L608 720z" fill="#d7ff45"/>
+  <path d="M402 720h-94l214-416h94zm204 0h-94l214-416h94z" fill="#f7f4ea" opacity=".98"/>
+</svg>

@@ -5,6 +5,6 @@
   "type": "module",
   "scripts": {
     "test": "node --test tests/*.test.mjs",
-    "validate": "node --check app.js && node --check engine.mjs && node --check scripts/update-fpl-data.mjs && node --check scripts/backtest-model.mjs && node --check scripts/backtest-historical.mjs && npm test"
+    "validate": "node --check app.js && node --check engine.mjs && node --check pwa.js && node --check sw.js && node --check scripts/update-fpl-data.mjs && node --check scripts/backtest-model.mjs && node --check scripts/backtest-historical.mjs && npm test"
   }
 }

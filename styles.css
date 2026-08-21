@@ -264,3 +264,83 @@ footer { display: flex; justify-content: space-between; padding: 26px 0 36px; bo
   font-size: 0.76rem;
   line-height: 1.45;
 }
+
+.install-button {
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid rgba(13, 31, 26, 0.18);
+  border-radius: 10px;
+  padding: 0 13px;
+  background: var(--ink);
+  color: white;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.install-button:hover { background: var(--green); }
+.install-button:focus-visible,
+.install-close:focus-visible { outline: 3px solid var(--orange); outline-offset: 3px; }
+
+.install-overlay {
+  position: fixed;
+  z-index: 100;
+  inset: 0;
+  display: grid;
+  align-items: end;
+  padding: 18px;
+  padding-bottom: max(18px, env(safe-area-inset-bottom));
+  background: rgba(4, 17, 13, 0.62);
+  backdrop-filter: blur(8px);
+}
+
+.install-sheet {
+  width: min(100%, 520px);
+  position: relative;
+  margin: 0 auto;
+  border-radius: 24px;
+  padding: 28px;
+  background: #f7f4ea;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.28);
+}
+
+.install-sheet > img { border-radius: 17px; box-shadow: 0 8px 22px rgba(13, 31, 26, 0.18); }
+.install-sheet h2 { max-width: 410px; margin: 10px 0 22px; font-size: clamp(28px, 8vw, 40px); line-height: 1.02; }
+.install-sheet .section-index { margin-top: 20px; }
+.install-close {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  width: 38px;
+  height: 38px;
+  border: 0;
+  border-radius: 50%;
+  background: #e7e5dc;
+  color: var(--ink);
+  font-size: 25px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.install-steps { display: grid; gap: 14px; margin: 0; padding: 0; list-style: none; }
+.install-steps li { display: grid; grid-template-columns: 32px 1fr; gap: 12px; align-items: start; }
+.install-steps li > span { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 50%; background: var(--lime); color: var(--ink); font: 700 12px "DM Mono", monospace; }
+.install-steps p { margin: 5px 0 0; color: #354940; font-size: 14px; line-height: 1.45; }
+.install-note { margin: 22px 0 0; padding-top: 16px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; line-height: 1.5; }
+body.install-open { overflow: hidden; }
+
+@media (min-width: 621px) {
+  .install-overlay { align-items: center; }
+}
+
+@media (max-width: 620px) {
+  body { padding-top: env(safe-area-inset-top); }
+  .topbar { width: min(100% - 20px, 1180px); gap: 8px; }
+  .data-status { margin-left: auto; }
+  .install-button { padding-inline: 10px; }
+  .install-button span:last-child { display: none; }
+  .install-sheet { padding: 24px 22px; border-radius: 22px; }
+}

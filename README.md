@@ -5,6 +5,10 @@ official public FPL player feed, builds a legal 15-player squad, selects a
 starting XI and captain, and can compare the recommendation with a public FPL
 team ID.
 
+It is also an installable Progressive Web App. On iPhone, open the deployed site
+in Safari, tap **Share**, choose **Add to Home Screen**, then tap **Add**. The app
+uses a standalone display, a dedicated icon and an offline application shell.
+
 ## What it does
 
 - Uses official player prices, availability, xG/xA, starts, minutes, bonus and recent gameweek histories refreshed automatically every hour
@@ -19,6 +23,8 @@ team ID.
 - Runs a rolling-origin backtest and publishes the latest out-of-sample error and rank-correlation metrics with the snapshot
 - Shows when the deployed dataset was last updated
 - Falls back to clearly labelled demonstration data only if the deployed snapshot is unavailable
+- Installs on iPhone and other supported devices without an App Store account or fee
+- Keeps the interface available offline while using fresh network data whenever connectivity returns
 
 ## Run locally
 
