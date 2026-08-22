@@ -1,0 +1,7 @@
+export function parsePair(pair='GBP/MYR'){const [base,quote]=pair.toUpperCase().replace('-','/').split('/');if(!base||!quote||base.length!==3||quote.length!==3)throw new Error('Invalid FX pair');return{base,quote};}
+export function pctChange(current,previous){return previous?((current/previous)-1)*100:null;}
+export function rangePosition(current,low,high){return high===low?50:Math.max(0,Math.min(100,((current-low)/(high-low))*100));}
+export function realisedVol(values){if(!values||values.length<3)return null;const r=[];for(let i=1;i<values.length;i++)r.push(Math.log(values[i]/values[i-1]));const mean=r.reduce((a,b)=>a+b,0)/r.length;const variance=r.reduce((a,b)=>a+(b-mean)**2,0)/(r.length-1);return Math.sqrt(variance)*Math.sqrt(252)*100;}
+export function trend(values){if(!values||values.length<10)return'Insufficient history';const n=Math.min(20,values.length), recent=values.slice(-n), half=Math.floor(n/2);const a=recent.slice(0,half).reduce((x,y)=>x+y,0)/half,b=recent.slice(half).reduce((x,y)=>x+y,0)/(n-half),move=(b/a-1)*100;if(move>.6)return'Bullish';if(move>.15)return'Moderately Bullish';if(move<-.6)return'Bearish';if(move<-.15)return'Moderately Bearish';return'Neutral';}
+export function freshness(timestamp,now=Date.now()){const age=(now-new Date(timestamp).getTime())/60000;if(age<=5)return'LIVE';if(age<=60)return'DELAYED';return'STALE';}
+export function divergence(a,b){return Math.abs((a/b-1)*100);}
