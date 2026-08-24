@@ -1,10 +1,10 @@
-const CACHE_VERSION = "fpl-optimal-v1";
+const CACHE_VERSION = "fpl-optimal-v2";
 const APP_SHELL = [
   "./",
   "./index.html",
   "./styles.css",
-  "./app.js",
-  "./engine.mjs",
+  "./app.js?v=20260824-1",
+  "./engine.mjs?v=20260824-1",
   "./pwa.js",
   "./manifest.webmanifest",
   "./icons/icon.svg",

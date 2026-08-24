@@ -17,6 +17,8 @@ uses a standalone display, a dedicated icon and an offline application shell.
 - Enforces the FPL 2 GK / 5 DEF / 5 MID / 3 FWD squad structure
 - Enforces the three-player-per-club rule and user-defined budget
 - Deterministically optimises the starting XI, captain and weighted bench rather than treating all 15 slots equally
+- Targets the next actionable deadline even while the previous gameweek is still being completed
+- Prevents next-gameweek goalkeeper/defender versus opposing midfielder/forward clashes whenever a clash-free legal XI exists
 - Supports balanced, reliability-aware safe and low-ownership differential strategies without changing the displayed mean forecast
 - Imports a public team by FPL ID and proposes up to three changes after free-transfer and four-point-hit costs
 - Generates a browser-safe FPL snapshot during every deployment and hourly refresh

@@ -1,9 +1,11 @@
 import {
+  fixtureClashes,
   optimiseSquad,
   optimiseTransfers,
   pickStartingXI,
   projectPlayers,
-} from "./engine.mjs";
+  resolveTargetEvent,
+} from "./engine.mjs?v=20260824-1";
 
 const FPL_API = "https://fantasy.premierleague.com/api";
 const FPL_SQUAD_URL = "https://fantasy.premierleague.com/en/squad-selection";
@@ -141,7 +143,11 @@ function renderResults(squad, imported = []) {
   const premium = [...squad].sort((a, b) => b.price - a.price)[0];
   const value = [...squad].sort((a, b) => (b.projected / b.price) - (a.projected / a.price))[0];
   const differential = [...squad].filter((p) => p.selectedBy < 10).sort((a, b) => b.projected - a.projected)[0];
+  const clashes = fixtureClashes(starters, state.currentEvent);
   const reasonItems = [
+    clashes.length
+      ? `${clashes.length} defensive/attacking fixture clash${clashes.length === 1 ? " was" : "es were"} unavoidable in GW ${state.currentEvent}; the model selected the legal XI with the fewest conflicts.`
+      : `GW ${state.currentEvent} clash protection is active: no starting goalkeeper/defender faces one of your starting midfielders/forwards.`,
     `${captain.name} leads the expected-points model and earns the armband (${captain.floor.toFixed(1)}–${captain.ceiling.toFixed(1)} range).`,
     `${value.name} is the strongest value pick at ${money(value.price)}.`,
     differential ? `${differential.name} adds upside at only ${differential.selectedBy.toFixed(1)}% ownership.` : `${premium.name} anchors the squad's premium allocation.`,
@@ -360,7 +366,7 @@ async function loadData() {
     state.predictionCalibration = snapshot.predictionCalibration || null;
     state.modelMetrics = snapshot.modelMetrics || null;
     state.players = data.elements.map(normalisePlayer);
-    state.currentEvent = data.events.find((event) => event.is_current)?.id || data.events.find((event) => event.is_next)?.id;
+    state.currentEvent = resolveTargetEvent(data.events);
     state.live = true;
     status.className = "data-status live";
     const validation = state.modelMetrics?.rankCorrelation != null ? ` · backtest ρ ${Number(state.modelMetrics.rankCorrelation).toFixed(2)}` : "";

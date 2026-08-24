@@ -1,4 +1,15 @@
 export const POSITION_LIMITS = Object.freeze({ GK: 2, DEF: 5, MID: 5, FWD: 3 });
+const LEGAL_FORMATIONS = [
+  { GK: 1, DEF: 3, MID: 4, FWD: 3 },
+  { GK: 1, DEF: 3, MID: 5, FWD: 2 },
+  { GK: 1, DEF: 4, MID: 3, FWD: 3 },
+  { GK: 1, DEF: 4, MID: 4, FWD: 2 },
+  { GK: 1, DEF: 4, MID: 5, FWD: 1 },
+  { GK: 1, DEF: 5, MID: 3, FWD: 2 },
+  { GK: 1, DEF: 5, MID: 4, FWD: 1 },
+];
+const DEFENSIVE_POSITIONS = new Set(["GK", "DEF"]);
+const ATTACKING_POSITIONS = new Set(["MID", "FWD"]);
 
 const GOAL_POINTS = Object.freeze({ GK: 6, DEF: 6, MID: 5, FWD: 4 });
 const CLEAN_SHEET_POINTS = Object.freeze({ GK: 4, DEF: 4, MID: 1, FWD: 0 });
@@ -267,19 +278,115 @@ export function projectPlayers(players, context, horizon = 3, risk = "balanced")
   return players.map((player) => projectPlayer(player, modelContext, horizon, risk));
 }
 
+export function resolveTargetEvent(events, now = Date.now()) {
+  const available = Array.isArray(events) ? events : [];
+  const future = available
+    .filter((event) => {
+      const deadline = new Date(event.deadline_time).getTime();
+      return Number.isFinite(deadline) && deadline > Number(now);
+    })
+    .sort((left, right) => new Date(left.deadline_time) - new Date(right.deadline_time));
+  return future[0]?.id || available.find((event) => event.is_next)?.id ||
+    available.find((event) => event.is_current)?.id || null;
+}
+
+function combinations(items, size) {
+  if (size === 0) return [[]];
+  if (items.length < size) return [];
+  const output = [];
+  for (let index = 0; index <= items.length - size; index += 1) {
+    for (const tail of combinations(items.slice(index + 1), size - 1)) {
+      output.push([items[index], ...tail]);
+    }
+  }
+  return output;
+}
+
+function firstProjectedEvent(players) {
+  const events = players.flatMap((player) => (player.breakdown || [])
+    .map((fixture) => number(fixture.event, Infinity))
+    .filter(Number.isFinite));
+  return events.length ? Math.min(...events) : null;
+}
+
+function shareOpposingFixture(left, right, event) {
+  if (event == null) return false;
+  const leftFacesRight = (left.breakdown || []).some((fixture) =>
+    number(fixture.event) === event && number(fixture.opponentId) === number(right.teamId)
+  );
+  const rightFacesLeft = (right.breakdown || []).some((fixture) =>
+    number(fixture.event) === event && number(fixture.opponentId) === number(left.teamId)
+  );
+  return leftFacesRight && rightFacesLeft;
+}
+
+export function fixtureClashes(players, event = firstProjectedEvent(players)) {
+  const clashes = [];
+  for (let leftIndex = 0; leftIndex < players.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < players.length; rightIndex += 1) {
+      const left = players[leftIndex];
+      const right = players[rightIndex];
+      const opposingRoles = (
+        DEFENSIVE_POSITIONS.has(left.position) && ATTACKING_POSITIONS.has(right.position)
+      ) || (
+        ATTACKING_POSITIONS.has(left.position) && DEFENSIVE_POSITIONS.has(right.position)
+      );
+      if (opposingRoles && shareOpposingFixture(left, right, event)) {
+        clashes.push({ left, right, event });
+      }
+    }
+  }
+  return clashes;
+}
+
+function pickStartingXIFast(squad, scoreField = "selectionScore") {
+  const byPosition = squad.reduce((groups, player) => {
+    (groups[player.position] ||= []).push(player);
+    return groups;
+  }, {});
+  for (const position of Object.keys(POSITION_LIMITS)) byPosition[position] ||= [];
+  for (const group of Object.values(byPosition)) {
+    group.sort((left, right) => number(right[scoreField], right.projected) - number(left[scoreField], left.projected));
+  }
+  const starters = [byPosition.GK[0], ...byPosition.DEF.slice(0, 3), ...byPosition.MID.slice(0, 2), ...byPosition.FWD.slice(0, 1)];
+  const starterIds = new Set(starters.map((player) => player.id));
+  starters.push(...squad
+    .filter((player) => !starterIds.has(player.id) && player.position !== "GK")
+    .sort((left, right) => number(right[scoreField], right.projected) - number(left[scoreField], left.projected))
+    .slice(0, 11 - starters.length));
+  const finalStarterIds = new Set(starters.map((player) => player.id));
+  const outfieldBench = squad
+    .filter((player) => !finalStarterIds.has(player.id) && player.position !== "GK")
+    .sort((left, right) => number(right[scoreField], right.projected) - number(left[scoreField], left.projected));
+  const reserveKeeper = squad.find((player) => !finalStarterIds.has(player.id) && player.position === "GK");
+  return { starters, bench: reserveKeeper ? [...outfieldBench, reserveKeeper] : outfieldBench };
+}
+
 export function pickStartingXI(squad, scoreField = "selectionScore") {
   const byPosition = squad.reduce((groups, player) => {
     (groups[player.position] ||= []).push(player);
     return groups;
   }, {});
-  for (const group of Object.values(byPosition)) group.sort((a, b) => number(b[scoreField], b.projected) - number(a[scoreField], a.projected));
-  const starters = [byPosition.GK[0], ...byPosition.DEF.slice(0, 3), ...byPosition.MID.slice(0, 2), ...byPosition.FWD.slice(0, 1)];
-  const starterIds = new Set(starters.map((player) => player.id));
-  const optional = squad
-    .filter((player) => !starterIds.has(player.id) && player.position !== "GK")
-    .sort((a, b) => number(b[scoreField], b.projected) - number(a[scoreField], a.projected))
-    .slice(0, 11 - starters.length);
-  starters.push(...optional);
+  for (const position of Object.keys(POSITION_LIMITS)) byPosition[position] ||= [];
+  let best = null;
+  for (const formation of LEGAL_FORMATIONS) {
+    const groups = Object.entries(formation).map(([position, count]) => combinations(byPosition[position], count));
+    for (const keepers of groups[0]) {
+      for (const defenders of groups[1]) {
+        for (const midfielders of groups[2]) {
+          for (const forwards of groups[3]) {
+            const candidate = [...keepers, ...defenders, ...midfielders, ...forwards];
+            const clashes = fixtureClashes(candidate).length;
+            const score = sum(candidate.map((player) => number(player[scoreField], player.projected)));
+            if (!best || clashes < best.clashes || (clashes === best.clashes && score > best.score)) {
+              best = { starters: candidate, clashes, score };
+            }
+          }
+        }
+      }
+    }
+  }
+  const starters = best?.starters || [];
   const finalStarterIds = new Set(starters.map((player) => player.id));
   const outfieldBench = squad
     .filter((player) => !finalStarterIds.has(player.id) && player.position !== "GK")
@@ -290,14 +397,15 @@ export function pickStartingXI(squad, scoreField = "selectionScore") {
 
 export function squadObjective(squad) {
   if (!isLegalSquad(squad, Infinity)) return -Infinity;
-  const { starters, bench } = pickStartingXI(squad);
+  const { starters, bench } = pickStartingXIFast(squad);
   const captain = [...starters].sort((a, b) => b.selectionScore - a.selectionScore)[0];
   const outfieldBench = bench.filter((player) => player.position !== "GK");
   const keeper = bench.find((player) => player.position === "GK");
   const benchWeights = [0.16, 0.09, 0.05];
+  const clashPenalty = fixtureClashes(starters).length * 25;
   return sum(starters.map((player) => player.selectionScore)) + captain.selectionScore +
     sum(outfieldBench.map((player, index) => player.selectionScore * (benchWeights[index] || 0.03))) +
-    number(keeper?.selectionScore) * 0.035;
+    number(keeper?.selectionScore) * 0.035 - clashPenalty;
 }
 
 export function isLegalSquad(squad, budget) {

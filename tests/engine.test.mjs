@@ -2,11 +2,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   buildTeamModel,
+  fixtureClashes,
   isLegalSquad,
   optimiseSquad,
   optimiseTransfers,
   pickStartingXI,
   projectPlayer,
+  resolveTargetEvent,
 } from "../engine.mjs";
 
 const teams = new Map([
@@ -105,4 +107,37 @@ test("transfer optimiser includes hit cost and keeps the team when a paid move i
   assert.ok(result);
   assert.equal(result.transfers, 0);
   assert.equal(result.hitCost, 0);
+});
+
+test("next future deadline is targeted after the active gameweek deadline has passed", () => {
+  const events = [
+    { id: 1, is_current: true, deadline_time: "2026-08-21T17:30:00Z" },
+    { id: 2, is_next: true, deadline_time: "2026-08-28T17:30:00Z" },
+  ];
+  assert.equal(resolveTargetEvent(events, Date.parse("2026-08-24T08:00:00Z")), 2);
+  assert.equal(resolveTargetEvent(events, Date.parse("2026-08-20T08:00:00Z")), 1);
+});
+
+test("starting XI avoids opposing defender-versus-attacker fixture clashes", () => {
+  let id = 1;
+  const make = (position, teamId, selectionScore, opponentId = null) => ({
+    id: id++,
+    name: `${position}-${id}`,
+    position,
+    teamId,
+    price: 5,
+    projected: selectionScore,
+    selectionScore,
+    breakdown: opponentId == null ? [] : [{ event: 2, opponentId }],
+  });
+  const squad = [
+    make("GK", 3, 5), make("GK", 4, 1),
+    make("DEF", 1, 10, 2), make("DEF", 5, 9), make("DEF", 6, 8), make("DEF", 7, 7), make("DEF", 8, 1),
+    make("MID", 2, 10, 1), make("MID", 9, 9), make("MID", 10, 8), make("MID", 11, 7), make("MID", 12, 1),
+    make("FWD", 13, 9), make("FWD", 14, 8), make("FWD", 15, 1),
+  ];
+  const { starters } = pickStartingXI(squad);
+  assert.equal(starters.length, 11);
+  assert.equal(fixtureClashes(starters, 2).length, 0);
+  assert.equal(starters.some((player) => player.teamId === 1), false);
 });
