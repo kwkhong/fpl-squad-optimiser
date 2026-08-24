@@ -21,3 +21,10 @@ test("browser entrypoint is an ES module and loads the prediction engine", async
   assert.match(javascript, /from "\.\/engine\.mjs(?:\?v=[^"]+)?"/);
 });
 
+test("public transfer import uses a CORS-safe relay and retries the previous gameweek", async () => {
+  const javascript = await readFile("app.js", "utf8");
+  assert.match(javascript, /PUBLIC_FPL_RELAY/);
+  assert.match(javascript, /encodeURIComponent\(endpoint\)/);
+  assert.match(javascript, /Math\.max\(1, state\.currentEvent - 1\)/);
+  assert.match(javascript, /candidate\.picks\.length === 15/);
+});
