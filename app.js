@@ -8,6 +8,7 @@ import {
 } from "./engine.mjs?v=20260824-1";
 
 const FPL_API = "https://fantasy.premierleague.com/api";
+const PUBLIC_FPL_RELAY = "https://www.developerlab.dev/api/proxy?url=";
 const FPL_SQUAD_URL = "https://fantasy.premierleague.com/en/squad-selection";
 
 const POSITION = { 1: "GK", 2: "DEF", 3: "MID", 4: "FWD" };
@@ -253,10 +254,28 @@ async function loadCurrentTeam(teamId) {
   const candidates = [...new Set([state.currentEvent, Math.max(1, state.currentEvent - 1)])];
   let data = null;
   for (const event of candidates) {
-    const response = await fetch(`${FPL_API}/entry/${teamId}/event/${event}/picks/`);
-    if (response.ok) { data = await response.json(); break; }
+    const endpoint = `${FPL_API}/entry/${teamId}/event/${event}/picks/`;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    try {
+      const response = await fetch(`${PUBLIC_FPL_RELAY}${encodeURIComponent(endpoint)}`, {
+        credentials: "omit",
+        signal: controller.signal,
+      });
+      if (!response.ok) continue;
+      const candidate = await response.json();
+      if (Array.isArray(candidate?.picks) && candidate.picks.length === 15) {
+        data = candidate;
+        break;
+      }
+    } catch {
+      // A not-yet-published gameweek or a temporary relay failure should not
+      // stop us trying the most recent completed squad.
+    } finally {
+      clearTimeout(timeout);
+    }
   }
-  if (!data) throw new Error("That public team could not be loaded. Check the ID and try again.");
+  if (!data) throw new Error("Your public FPL squad could not be imported. Check the Team ID, then try again in a moment.");
   state.importedIds = data.picks.map((pick) => pick.element);
   state.bank = Number(data.entry_history?.bank || 0) / 10;
   const value = Number(data.entry_history?.value || 1000) / 10;
