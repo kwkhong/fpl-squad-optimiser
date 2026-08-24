@@ -18,6 +18,6 @@ test("browser entrypoint is an ES module and loads the prediction engine", async
     readFile("index.html", "utf8"),
   ]);
   assert.match(html, /<script type="module" src="app\.js/);
-  assert.match(javascript, /from "\.\/engine\.mjs"/);
+  assert.match(javascript, /from "\.\/engine\.mjs(?:\?v=[^"]+)?"/);
 });
 

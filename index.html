@@ -210,11 +210,12 @@
         </div>
         <div class="method-copy">
           <p>
-            The model estimates expected minutes and availability, shrinks noisy xG/xA and
+            The model targets the next actionable deadline, estimates expected minutes and availability, shrinks noisy xG/xA and
             bonus rates, derives fixture scoring from a recency-weighted Poisson team model,
             and prices uncertainty separately from expected points. A deterministic beam search
-            then maximises the legal starting XI, captain and weighted bench—not an arbitrary
-            sum of all 15 players.
+            then maximises the legal starting XI, captain and weighted bench while preventing
+            next-gameweek goalkeeper/defender versus opposing attacker clashes whenever a
+            clash-free legal XI exists—not an arbitrary sum of all 15 players.
           </p>
           <p class="fine-print">
             Official FPL data and recent gameweek histories refresh automatically. Transfer mode
@@ -242,7 +243,7 @@
       </article>
     </template>
 
-    <script type="module" src="app.js?v=20260821-3"></script>
+    <script type="module" src="app.js?v=20260824-1"></script>
     <script type="module" src="pwa.js?v=20260821-1"></script>
   </body>
 </html>
