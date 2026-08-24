@@ -21,10 +21,9 @@ test("browser entrypoint is an ES module and loads the prediction engine", async
   assert.match(javascript, /from "\.\/engine\.mjs(?:\?v=[^"]+)?"/);
 });
 
-test("public transfer import uses a CORS-safe relay and retries the previous gameweek", async () => {
+test("public transfer import uses the app-owned server endpoint", async () => {
   const javascript = await readFile("app.js", "utf8");
-  assert.match(javascript, /PUBLIC_FPL_RELAY/);
-  assert.match(javascript, /encodeURIComponent\(endpoint\)/);
-  assert.match(javascript, /Math\.max\(1, state\.currentEvent - 1\)/);
-  assert.match(javascript, /candidate\.picks\.length === 15/);
+  assert.match(javascript, /FPL_TEAM_API/);
+  assert.match(javascript, /fpl-squad-optimiser\.vercel\.app\/api\/fpl-team/);
+  assert.match(javascript, /new URLSearchParams/);
 });
