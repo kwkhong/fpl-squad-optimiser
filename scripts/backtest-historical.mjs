@@ -335,8 +335,8 @@ const deploymentCalibrations = new Map([
   ...["GK", "DEF", "MID", "FWD"].map((position) => [position, fitCalibration(observations, position)]),
 ]);
 const deploymentResiduals = fitResidualModel(observations, deploymentCalibrations);
-snapshot.schemaVersion = 3;
-snapshot.modelVersion = "3.0.0";
+snapshot.schemaVersion = 4;
+snapshot.modelVersion = "3.1.0";
 snapshot.predictionCalibration = {
   version: "3.0.0",
   trainedSeason: SEASON,
