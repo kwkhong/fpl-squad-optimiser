@@ -13,6 +13,7 @@ const ATTACKING_POSITIONS = new Set(["MID", "FWD"]);
 
 const GOAL_POINTS = Object.freeze({ GK: 6, DEF: 6, MID: 5, FWD: 4 });
 const CLEAN_SHEET_POINTS = Object.freeze({ GK: 4, DEF: 4, MID: 1, FWD: 0 });
+const HOME_SUPPORT_WEIGHT = 1.04;
 const RATE_PRIORS = Object.freeze({
   GK: { xg: 0.002, xa: 0.008, bonus: 0.10, cards: 0.035 },
   DEF: { xg: 0.055, xa: 0.080, bonus: 0.20, cards: 0.075 },
@@ -45,6 +46,32 @@ function weightedStdDev(values, mean) {
 function averageStrength(teams, field) {
   const values = teams.map((team) => number(team[field], 1000)).filter((value) => value > 0);
   return values.length ? sum(values) / values.length : 1000;
+}
+
+function poissonProbabilities(expectedGoals, maxGoals = 10) {
+  const probabilities = [Math.exp(-expectedGoals)];
+  for (let goals = 1; goals <= maxGoals; goals += 1) {
+    probabilities.push(probabilities[goals - 1] * expectedGoals / goals);
+  }
+  return probabilities;
+}
+
+export function outcomeProbabilities(homeGoals, awayGoals) {
+  const home = poissonProbabilities(clamp(number(homeGoals), 0.05, 5));
+  const away = poissonProbabilities(clamp(number(awayGoals), 0.05, 5));
+  let homeWin = 0;
+  let draw = 0;
+  let awayWin = 0;
+  for (let homeScore = 0; homeScore < home.length; homeScore += 1) {
+    for (let awayScore = 0; awayScore < away.length; awayScore += 1) {
+      const probability = home[homeScore] * away[awayScore];
+      if (homeScore > awayScore) homeWin += probability;
+      else if (homeScore === awayScore) draw += probability;
+      else awayWin += probability;
+    }
+  }
+  const total = homeWin + draw + awayWin;
+  return { home: homeWin / total, draw: draw / total, away: awayWin / total };
 }
 
 export function buildTeamModel(fixtures, teams, beforeEvent = Infinity) {
@@ -215,6 +242,19 @@ export function projectPlayer(player, context, horizon = 3, risk = "balanced") {
     const opponentId = isHome ? fixture.team_a : fixture.team_h;
     const teamGoals = context.teamModel.expectedGoals(player.teamId, opponentId, isHome);
     const opponentGoals = context.teamModel.expectedGoals(opponentId, player.teamId, !isHome);
+    const modelOutcome = outcomeProbabilities(
+      isHome ? teamGoals : opponentGoals,
+      isHome ? opponentGoals : teamGoals
+    );
+    const modelWinProbability = isHome ? modelOutcome.home : modelOutcome.away;
+    const market = context.oddsByFixture?.[String(fixture.id)] || context.oddsByFixture?.[fixture.id];
+    const marketWinProbability = number(isHome ? market?.fairHome : market?.fairAway, NaN);
+    const hasMarketOdds = Number.isFinite(marketWinProbability) && marketWinProbability >= 0 && marketWinProbability <= 1;
+    const winProbability = hasMarketOdds
+      ? 0.65 * modelWinProbability + 0.35 * marketWinProbability
+      : modelWinProbability;
+    const homeSupportWeight = isHome ? HOME_SUPPORT_WEIGHT : 1;
+    const winProbabilityWeight = clamp(0.94 + 0.12 * winProbability, 0.94, 1.06);
     const attackScale = clamp(teamGoals / context.teamModel.neutralGoals(player.teamId), 0.68, 1.48);
     const minutesShare = minuteModel.expected / 90;
     const expectedGoals = xg90 * formMultiplier * minutesShare * attackScale;
@@ -228,7 +268,10 @@ export function projectPlayer(player, context, horizon = 3, risk = "balanced") {
     const bonusPoints = bonus90 * minutesShare * clamp((teamGoals + 0.5) / 1.9, 0.72, 1.25);
     const discipline = -card90 * minutesShare;
     const eventWeight = 0.97 ** Math.max(0, fixture.event - currentEvent);
-    const points = Math.max(0, appearancePoints + attackingPoints + cleanSheetPoints + savePoints + concededPenalty + bonusPoints + discipline) * eventWeight;
+    const performancePoints = attackingPoints + cleanSheetPoints + savePoints + concededPenalty + bonusPoints;
+    const points = Math.max(0,
+      appearancePoints + performancePoints * homeSupportWeight * winProbabilityWeight + discipline
+    ) * eventWeight;
     projected += points;
     breakdown.push({
       event: fixture.event,
@@ -236,6 +279,12 @@ export function projectPlayer(player, context, horizon = 3, risk = "balanced") {
       isHome,
       teamGoals,
       opponentGoals,
+      modelWinProbability,
+      marketWinProbability: hasMarketOdds ? marketWinProbability : null,
+      winProbability,
+      homeSupportWeight,
+      winProbabilityWeight,
+      oddsAvailable: hasMarketOdds,
       expectedMinutes: minuteModel.expected,
       points,
     });
