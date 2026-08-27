@@ -13,6 +13,8 @@ uses a standalone display, a dedicated icon and an offline application shell.
 
 - Uses official player prices, availability, xG/xA, starts, minutes, bonus and recent gameweek histories refreshed automatically every hour
 - Scores the actual next 1, 3 or 5 gameweeks fixture by fixture with a recency-weighted Poisson team model
+- Adds a controlled 4% home-support premium and prioritises players from teams with higher blended model/bookmaker win probabilities
+- Downloads free market-average 1X2 odds, removes the bookmaker margin, and safely falls back to the Poisson probability where odds are not yet published
 - Shrinks noisy per-90 rates toward position priors and models expected minutes, appearance probability and clean-sheet probability
 - Enforces the FPL 2 GK / 5 DEF / 5 MID / 3 FWD squad structure
 - Enforces the three-player-per-club rule and user-defined budget
@@ -47,11 +49,14 @@ also republishes automatically every hour. In repository settings, set
 
 ## Model and validation
 
-Model v3 separates prediction from decision strategy. Its structural layer combines
+Model v3.1 separates prediction from decision strategy. Its structural layer combines
 appearance points, position-specific goal value, expected assists, Poisson clean-sheet
 probability, saves, goals conceded, cards and empirically shrunk bonus rates. Recent
 gameweeks influence expected minutes and form, while older team results receive less
-weight. Squad construction uses deterministic beam search followed by legal local
+weight. A modest home-support premium and a bounded win-probability weight are applied
+to performance-linked points. When market odds are available, 35% of the win estimate
+comes from margin-free market-average probabilities and 65% from the model; without
+odds, the system continues with the model probability. Squad construction uses deterministic beam search followed by legal local
 improvement and scores the XI, captain and likely autosub value.
 
 A position-specific ensemble calibrates that structural forecast against recent form
@@ -68,6 +73,6 @@ completed gameweeks, validation falls back to a rolling 2024/25 test from the
 which is derived from official FPL data and distributed under its repository licence.
 Early-season samples are small, and official team-strength priors may still contain
 information updated after a historic gameweek, so the backtest is monitoring evidence
-rather than a guarantee of future performance. Predicted line-ups and betting odds are
-not included because the app has no reliable, free, browser-safe source for them;
-review late team news before locking a team.
+rather than a guarantee of future performance. Odds are supplied by
+[Football-Data.co.uk](https://www.football-data.co.uk/) and may not be published until
+the provider's scheduled weekend or midweek update; review late team news before locking a team.

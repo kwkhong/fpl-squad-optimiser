@@ -5,7 +5,7 @@ import {
   pickStartingXI,
   projectPlayers,
   resolveTargetEvent,
-} from "./engine.mjs?v=20260824-1";
+} from "./engine.mjs?v=20260827-1";
 
 const FPL_API = "https://fantasy.premierleague.com/api";
 const FPL_TEAM_API = "https://fpl-squad-optimiser.vercel.app/api/fpl-team";
@@ -23,6 +23,7 @@ const state = {
   historyByPlayer: {},
   predictionCalibration: null,
   modelMetrics: null,
+  oddsByFixture: {},
   live: false,
   importedIds: [],
   bank: 0,
@@ -145,10 +146,26 @@ function renderResults(squad, imported = []) {
   const value = [...squad].sort((a, b) => (b.projected / b.price) - (a.projected / a.price))[0];
   const differential = [...squad].filter((p) => p.selectedBy < 10).sort((a, b) => b.projected - a.projected)[0];
   const clashes = fixtureClashes(starters, state.currentEvent);
+  const nextBreakdowns = starters
+    .map((player) => (player.breakdown || []).find((fixture) => fixture.event === state.currentEvent))
+    .filter(Boolean);
+  const homeStarters = nextBreakdowns.filter((fixture) => fixture.isHome).length;
+  const oddsBacked = nextBreakdowns.filter((fixture) => fixture.oddsAvailable).length;
+  const strongestFavourite = [...starters]
+    .filter((player) => (player.breakdown || []).some((fixture) => fixture.event === state.currentEvent))
+    .sort((left, right) => {
+      const leftFixture = left.breakdown.find((fixture) => fixture.event === state.currentEvent);
+      const rightFixture = right.breakdown.find((fixture) => fixture.event === state.currentEvent);
+      return (rightFixture?.winProbability || 0) - (leftFixture?.winProbability || 0);
+    })[0];
+  const favouriteFixture = strongestFavourite?.breakdown.find((fixture) => fixture.event === state.currentEvent);
   const reasonItems = [
     clashes.length
       ? `${clashes.length} defensive/attacking fixture clash${clashes.length === 1 ? " was" : "es were"} unavoidable in GW ${state.currentEvent}; the model selected the legal XI with the fewest conflicts.`
       : `GW ${state.currentEvent} clash protection is active: no starting goalkeeper/defender faces one of your starting midfielders/forwards.`,
+    oddsBacked
+      ? `${homeStarters} starters play at home; ${oddsBacked} picks use margin-free bookmaker odds. ${strongestFavourite.name}'s team has the strongest blended win chance (${(favouriteFixture.winProbability * 100).toFixed(0)}%).`
+      : `${homeStarters} starters play at home and receive the controlled home-support premium; bookmaker odds are pending, so win chances currently use the Poisson model.`,
     `${captain.name} leads the expected-points model and earns the armband (${captain.floor.toFixed(1)}–${captain.ceiling.toFixed(1)} range).`,
     `${value.name} is the strongest value pick at ${money(value.price)}.`,
     differential ? `${differential.name} adds upside at only ${differential.selectedBy.toFixed(1)}% ownership.` : `${premium.name} anchors the squad's premium allocation.`,
@@ -301,6 +318,7 @@ async function optimise() {
       currentEvent: state.currentEvent,
       historyByPlayer: state.historyByPlayer,
       predictionCalibration: state.predictionCalibration,
+      oddsByFixture: state.oddsByFixture,
     }, horizon, risk);
     state.players = scored;
 
@@ -372,12 +390,17 @@ async function loadData() {
     state.historyByPlayer = snapshot.historyByPlayer || {};
     state.predictionCalibration = snapshot.predictionCalibration || null;
     state.modelMetrics = snapshot.modelMetrics || null;
+    state.oddsByFixture = snapshot.oddsByFixture || {};
     state.players = data.elements.map(normalisePlayer);
     state.currentEvent = resolveTargetEvent(data.events);
     state.live = true;
     status.className = "data-status live";
     const validation = state.modelMetrics?.rankCorrelation != null ? ` · backtest ρ ${Number(state.modelMetrics.rankCorrelation).toFixed(2)}` : "";
-    status.querySelector("span:last-child").textContent = `${state.players.length} live players · ${dataFreshness(snapshot.updatedAt)} · GW ${state.currentEvent || "—"}${validation}`;
+    const oddsCount = state.fixtures.filter((fixture) =>
+      !fixture.finished && state.oddsByFixture[String(fixture.id)]
+    ).length;
+    const oddsStatus = oddsCount ? ` · ${oddsCount} bookie markets` : " · odds pending";
+    status.querySelector("span:last-child").textContent = `${state.players.length} live players · ${dataFreshness(snapshot.updatedAt)} · GW ${state.currentEvent || "—"}${oddsStatus}${validation}`;
   } catch (error) {
     console.error("FPL snapshot failed to load", error);
     state.players = demoData().map(normalisePlayer);
@@ -401,8 +424,8 @@ $$('.mode-button').forEach((button) => button.addEventListener('click', () => {
   $('#freeTransfersField').classList.toggle('hidden', state.mode !== 'transfers');
   $('#optimiseButton span:first-child').textContent = state.mode === 'new' ? 'Optimise my squad' : 'Plan my transfers';
   $('#actionHint').textContent = state.mode === 'new'
-    ? 'Calibrates expected minutes, xG/xA, clean sheets, bonus and fixture scoring.'
-    : 'Optimises up to three transfers after free-transfer and hit costs.';
+    ? 'Calibrates minutes, xG/xA, home support, clean sheets and bookmaker win odds.'
+    : 'Optimises up to three transfers using home support, win odds and hit costs.';
 }));
 
 $('#optimiseButton').addEventListener('click', optimise);

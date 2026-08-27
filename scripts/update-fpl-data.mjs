@@ -1,4 +1,5 @@
 import { mkdir, writeFile } from "node:fs/promises";
+import { mapOddsToFixtures, seasonCode } from "../odds.mjs";
 
 const API = "https://fantasy.premierleague.com/api";
 const headers = {
@@ -19,6 +20,24 @@ async function getJson(path) {
     } catch (error) {
       lastError = error;
       if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, 500 * (2 ** (attempt - 1))));
+    }
+  }
+  throw lastError;
+}
+
+async function getText(url) {
+  let lastError;
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      const response = await fetch(url, {
+        headers,
+        signal: AbortSignal.timeout(30000),
+      });
+      if (!response.ok) throw new Error(`${url} returned HTTP ${response.status}`);
+      return await response.text();
+    } catch (error) {
+      lastError = error;
+      if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 500));
     }
   }
   throw lastError;
@@ -70,15 +89,32 @@ for (const { event, data } of liveEvents) {
   }
 }
 
+const oddsUrls = [
+  `https://www.football-data.co.uk/mmz4281/${seasonCode()}/E0.csv`,
+  "https://www.football-data.co.uk/fixtures.csv",
+];
+const oddsTexts = [];
+for (const url of oddsUrls) {
+  try {
+    oddsTexts.push(await getText(url));
+  } catch (error) {
+    console.warn(`Optional bookmaker feed unavailable: ${error.message}`);
+  }
+}
+const teams = new Map(bootstrap.teams.map((team) => [team.id, team]));
+const oddsByFixture = mapOddsToFixtures(oddsTexts, fixtures, teams);
+
 const payload = {
-  schemaVersion: 3,
-  modelVersion: "3.0.0",
+  schemaVersion: 4,
+  modelVersion: "3.1.0",
   updatedAt: new Date().toISOString(),
   source: "Official Fantasy Premier League API",
   bootstrap,
   fixtures,
   historyEvents: completedEvents,
   historyByPlayer,
+  oddsByFixture,
+  oddsSource: "Football-Data.co.uk market-average 1X2 odds",
   modelMetrics: null,
 };
 
@@ -86,5 +122,6 @@ await mkdir("data", { recursive: true });
 await writeFile("data/fpl.json", JSON.stringify(payload));
 console.log(
   `Validated ${bootstrap.elements.length} players, ${bootstrap.teams.length} clubs, ` +
-  `${fixtures.length} fixtures and ${completedEvents.length} gameweeks at ${payload.updatedAt}`
+  `${fixtures.length} fixtures, ${Object.keys(oddsByFixture).length} bookmaker markets and ` +
+  `${completedEvents.length} gameweeks at ${payload.updatedAt}`
 );

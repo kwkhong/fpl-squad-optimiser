@@ -6,10 +6,12 @@ import {
   isLegalSquad,
   optimiseSquad,
   optimiseTransfers,
+  outcomeProbabilities,
   pickStartingXI,
   projectPlayer,
   resolveTargetEvent,
 } from "../engine.mjs";
+import { fairProbabilities, mapOddsToFixtures, normaliseTeamName } from "../odds.mjs";
 
 const teams = new Map([
   [1, { id: 1, strength_attack_home: 1200, strength_attack_away: 1150, strength_defence_home: 1200, strength_defence_away: 1150 }],
@@ -19,6 +21,25 @@ const teams = new Map([
 test("Poisson team model respects stronger attack and weaker opposing defence", () => {
   const model = buildTeamModel([], teams, 1);
   assert.ok(model.expectedGoals(1, 2, true) > model.expectedGoals(2, 1, false));
+});
+
+test("bookmaker odds are de-vigged and mapped to FPL fixtures", () => {
+  const fair = fairProbabilities(2, 4, 4);
+  assert.ok(Math.abs(fair.home + fair.draw + fair.away - 1) < 1e-9);
+  assert.equal(Number(fair.home.toFixed(3)), 0.5);
+  assert.equal(normaliseTeamName("Man Utd"), "man united");
+  const csv = "Div,HomeTeam,AwayTeam,AvgH,AvgD,AvgA\nE0,Man United,Hull,1.5,4,7\n";
+  const mapped = mapOddsToFixtures(csv ? [csv] : [], [{ id: 12, team_h: 1, team_a: 2 }], new Map([
+    [1, { id: 1, name: "Man Utd" }],
+    [2, { id: 2, name: "Hull City" }],
+  ]));
+  assert.ok(mapped[12].fairHome > mapped[12].fairAway);
+});
+
+test("outcome probabilities are normalized and favour the higher-scoring team", () => {
+  const probabilities = outcomeProbabilities(2.2, 0.7);
+  assert.ok(Math.abs(probabilities.home + probabilities.draw + probabilities.away - 1) < 1e-9);
+  assert.ok(probabilities.home > probabilities.away);
 });
 
 test("player projection rewards an easier attacking fixture and exposes uncertainty", () => {
@@ -54,6 +75,33 @@ test("player projection rewards an easier attacking fixture and exposes uncertai
   }, 1, "balanced");
   assert.equal(calibrated.structuralProjected, easy.projected);
   assert.equal(calibrated.projected, Number((easy.projected * 0.5).toFixed(2)));
+});
+
+test("projection explicitly rewards home support and stronger bookmaker win probability", () => {
+  const player = {
+    id: 20, teamId: 1, position: "MID", minutes: 900, starts: 10, appearances: 10,
+    expectedGoals: 4, expectedAssists: 3, bonus: 8, saves: 0, yellowCards: 0, redCards: 0,
+    pointsPerGame: 5, selectedBy: 20, chance: 100, status: "a",
+  };
+  const teamModel = { expectedGoals: (teamId) => teamId === 1 ? 1.5 : 1.1, neutralGoals: () => 1.4 };
+  const context = {
+    currentEvent: 2,
+    fixtures: [{ id: 90, event: 2, finished: false, team_h: 1, team_a: 2 }],
+    historyByPlayer: { 20: [{ event: 1, minutes: 90, total_points: 6, expected_goals: 0.3, expected_assists: 0.2 }] },
+    teamModel,
+  };
+  const favourite = projectPlayer(player, {
+    ...context,
+    oddsByFixture: { 90: { fairHome: 0.75, fairDraw: 0.16, fairAway: 0.09 } },
+  }, 1);
+  const outsider = projectPlayer(player, {
+    ...context,
+    oddsByFixture: { 90: { fairHome: 0.15, fairDraw: 0.20, fairAway: 0.65 } },
+  }, 1);
+  assert.ok(favourite.projected > outsider.projected);
+  assert.equal(favourite.breakdown[0].homeSupportWeight, 1.04);
+  assert.equal(favourite.breakdown[0].oddsAvailable, true);
+  assert.ok(favourite.breakdown[0].winProbability > outsider.breakdown[0].winProbability);
 });
 
 function makePlayers() {
