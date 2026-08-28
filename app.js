@@ -1,11 +1,12 @@
 import {
   fixtureClashes,
+  isConfirmedUnavailable,
   optimiseSquad,
   optimiseTransfers,
   pickStartingXI,
   projectPlayers,
   resolveTargetEvent,
-} from "./engine.mjs?v=20260827-1";
+} from "./engine.mjs?v=20260828-1";
 
 const FPL_API = "https://fantasy.premierleague.com/api";
 const FPL_TEAM_API = "https://fpl-squad-optimiser.vercel.app/api/fpl-team";
@@ -24,6 +25,7 @@ const state = {
   predictionCalibration: null,
   modelMetrics: null,
   oddsByFixture: {},
+  confirmedUnavailableCount: 0,
   live: false,
   importedIds: [],
   bank: 0,
@@ -81,6 +83,7 @@ function normalisePlayer(player) {
     chance: player.chance_of_playing_next_round == null ? 100 : Number(player.chance_of_playing_next_round),
     status: player.status || "a",
     news: player.news || "",
+    newsAdded: player.news_added || null,
   };
 }
 
@@ -160,6 +163,7 @@ function renderResults(squad, imported = []) {
     })[0];
   const favouriteFixture = strongestFavourite?.breakdown.find((fixture) => fixture.event === state.currentEvent);
   const reasonItems = [
+    `${state.confirmedUnavailableCount} confirmed injured, suspended or unavailable players were excluded before optimisation.`,
     clashes.length
       ? `${clashes.length} defensive/attacking fixture clash${clashes.length === 1 ? " was" : "es were"} unavoidable in GW ${state.currentEvent}; the model selected the legal XI with the fewest conflicts.`
       : `GW ${state.currentEvent} clash protection is active: no starting goalkeeper/defender faces one of your starting midfielders/forwards.`,
@@ -242,7 +246,7 @@ function renderTransfers(importedIds, recommended, plan = null) {
   const currentIds = new Set(current.map((p) => p.id));
   const incoming = recommended.filter((p) => !currentIds.has(p.id)).sort((a, b) => b.projected - a.projected);
   const remainingIncoming = [...incoming];
-  const moves = outgoing.slice(0, 3).map((out) => {
+  const moves = outgoing.slice(0, Math.max(3, plan?.forcedReplacements || 0)).map((out) => {
     const matchIndex = remainingIncoming.findIndex((player) => player.position === out.position);
     if (matchIndex < 0) return null;
     return { out, in: remainingIncoming.splice(matchIndex, 1)[0] };
@@ -262,6 +266,12 @@ function renderTransfers(importedIds, recommended, plan = null) {
     warning.className = "fine-print transfer-cost";
     warning.textContent = `Net projection includes a ${plan.hitCost}-point transfer hit.`;
     $("#transferList").append(warning);
+  }
+  if (plan?.forcedReplacements > 0) {
+    const forced = document.createElement("p");
+    forced.className = "fine-print transfer-cost";
+    forced.textContent = `${plan.forcedReplacements} confirmed absence${plan.forcedReplacements === 1 ? " was" : "s were"} automatically removed from the proposed squad.`;
+    $("#transferList").append(forced);
   }
   card.classList.remove("hidden");
 }
@@ -392,6 +402,7 @@ async function loadData() {
     state.modelMetrics = snapshot.modelMetrics || null;
     state.oddsByFixture = snapshot.oddsByFixture || {};
     state.players = data.elements.map(normalisePlayer);
+    state.confirmedUnavailableCount = state.players.filter(isConfirmedUnavailable).length;
     state.currentEvent = resolveTargetEvent(data.events);
     state.live = true;
     status.className = "data-status live";
@@ -400,7 +411,7 @@ async function loadData() {
       !fixture.finished && state.oddsByFixture[String(fixture.id)]
     ).length;
     const oddsStatus = oddsCount ? ` · ${oddsCount} bookie markets` : " · odds pending";
-    status.querySelector("span:last-child").textContent = `${state.players.length} live players · ${dataFreshness(snapshot.updatedAt)} · GW ${state.currentEvent || "—"}${oddsStatus}${validation}`;
+    status.querySelector("span:last-child").textContent = `${state.players.length} live players · ${state.confirmedUnavailableCount} unavailable excluded · ${dataFreshness(snapshot.updatedAt)} · GW ${state.currentEvent || "—"}${oddsStatus}${validation}`;
   } catch (error) {
     console.error("FPL snapshot failed to load", error);
     state.players = demoData().map(normalisePlayer);
@@ -424,8 +435,8 @@ $$('.mode-button').forEach((button) => button.addEventListener('click', () => {
   $('#freeTransfersField').classList.toggle('hidden', state.mode !== 'transfers');
   $('#optimiseButton span:first-child').textContent = state.mode === 'new' ? 'Optimise my squad' : 'Plan my transfers';
   $('#actionHint').textContent = state.mode === 'new'
-    ? 'Calibrates minutes, xG/xA, home support, clean sheets and bookmaker win odds.'
-    : 'Optimises up to three transfers using home support, win odds and hit costs.';
+    ? 'Excludes confirmed absences, then calibrates minutes, home support and bookmaker win odds.'
+    : 'Replaces confirmed absences before weighing home support, win odds and hit costs.';
 }));
 
 $('#optimiseButton').addEventListener('click', optimise);
