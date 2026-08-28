@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   buildTeamModel,
   fixtureClashes,
+  isConfirmedUnavailable,
   isLegalSquad,
   optimiseSquad,
   optimiseTransfers,
@@ -139,6 +140,24 @@ test("deterministic optimiser returns a legal squad and legal XI", () => {
   assert.ok(starters.filter((player) => player.position === "FWD").length >= 1);
 });
 
+test("confirmed injuries and other hard unavailability flags are excluded from new squads", () => {
+  const players = makePlayers();
+  const blocked = [players[0], players[6], players[20], players[34], players[7]];
+  blocked[0].status = "i";
+  blocked[1].status = "s";
+  blocked[2].status = "u";
+  blocked[3].status = "n";
+  blocked[4].chance = 0;
+  for (const player of blocked) {
+    player.projected = 50;
+    player.selectionScore = 50;
+  }
+  const squad = optimiseSquad(players, 100, { beamWidth: 1200 });
+  assert.ok(squad);
+  assert.equal(squad.some(isConfirmedUnavailable), false);
+  assert.equal(isConfirmedUnavailable({ status: "d", chance: 25 }), false);
+});
+
 test("transfer optimiser includes hit cost and keeps the team when a paid move is not worth four points", () => {
   const players = makePlayers();
   const current = optimiseSquad(players, 100, { beamWidth: 1200 });
@@ -155,6 +174,21 @@ test("transfer optimiser includes hit cost and keeps the team when a paid move i
   assert.ok(result);
   assert.equal(result.transfers, 0);
   assert.equal(result.hitCost, 0);
+});
+
+test("transfer optimiser forces replacement of a confirmed injured player", () => {
+  const players = makePlayers();
+  const current = optimiseSquad(players, 100, { beamWidth: 1200 });
+  assert.ok(current);
+  const injured = current[0];
+  injured.status = "i";
+  injured.chance = 0;
+  const result = optimiseTransfers(current, players, 10, 0, 1);
+  assert.ok(result);
+  assert.equal(result.squad.some((player) => player.id === injured.id), false);
+  assert.equal(result.squad.some(isConfirmedUnavailable), false);
+  assert.equal(result.forcedReplacements, 1);
+  assert.equal(result.hitCost, 4);
 });
 
 test("next future deadline is targeted after the active gameweek deadline has passed", () => {
