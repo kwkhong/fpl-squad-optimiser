@@ -27,7 +27,7 @@
       href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=20260827-1" />
+    <link rel="stylesheet" href="styles.css?v=20260828-1" />
   </head>
   <body>
     <div class="noise" aria-hidden="true"></div>
@@ -144,7 +144,7 @@
             <span>Optimise my squad</span>
             <span aria-hidden="true">↗</span>
           </button>
-          <p id="actionHint">Calibrates minutes, xG/xA, home support, clean sheets and bookmaker win odds.</p>
+          <p id="actionHint">Excludes confirmed absences, then calibrates minutes, home support and bookmaker win odds.</p>
         </div>
         <div class="message hidden" id="message" role="status"></div>
       </section>
@@ -219,7 +219,8 @@
             clash-free legal XI exists—not an arbitrary sum of all 15 players.
           </p>
           <p class="fine-print">
-            Official FPL data, recent histories and available market odds refresh automatically. Transfer mode
+            Official FPL injuries, suspensions and unavailable flags are checked on every refresh; confirmed absences are excluded and replaced automatically.
+            Recent histories and available market odds also refresh automatically. Transfer mode
             deducts four-point hits beyond the selected free transfers. Confirm late team news before each deadline.
           </p>
         </div>
@@ -244,7 +245,7 @@
       </article>
     </template>
 
-    <script type="module" src="app.js?v=20260827-1"></script>
+    <script type="module" src="app.js?v=20260828-1"></script>
     <script type="module" src="pwa.js?v=20260821-1"></script>
   </body>
 </html>

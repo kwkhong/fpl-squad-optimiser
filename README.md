@@ -12,6 +12,8 @@ uses a standalone display, a dedicated icon and an offline application shell.
 ## What it does
 
 - Uses official player prices, availability, xG/xA, starts, minutes, bonus and recent gameweek histories refreshed automatically every hour
+- Hard-excludes official FPL statuses for injured, suspended, unavailable and not-available players, plus anyone listed with a 0% chance of playing
+- Automatically replaces confirmed absences in transfer plans with the strongest legal alternatives, even when a points hit must be considered
 - Scores the actual next 1, 3 or 5 gameweeks fixture by fixture with a recency-weighted Poisson team model
 - Adds a controlled 4% home-support premium and prioritises players from teams with higher blended model/bookmaker win probabilities
 - Downloads free market-average 1X2 odds, removes the bookmaker margin, and safely falls back to the Poisson probability where odds are not yet published

@@ -10,6 +10,7 @@ const LEGAL_FORMATIONS = [
 ];
 const DEFENSIVE_POSITIONS = new Set(["GK", "DEF"]);
 const ATTACKING_POSITIONS = new Set(["MID", "FWD"]);
+const CONFIRMED_UNAVAILABLE_STATUSES = new Set(["i", "s", "u", "n"]);
 
 const GOAL_POINTS = Object.freeze({ GK: 6, DEF: 6, MID: 5, FWD: 4 });
 const CLEAN_SHEET_POINTS = Object.freeze({ GK: 4, DEF: 4, MID: 1, FWD: 0 });
@@ -24,6 +25,12 @@ const RATE_PRIORS = Object.freeze({
 export const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const number = (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback;
 const sum = (values) => values.reduce((total, value) => total + value, 0);
+
+export function isConfirmedUnavailable(player) {
+  const status = String(player?.status || "a").toLowerCase();
+  const chance = Number(player?.chance);
+  return CONFIRMED_UNAVAILABLE_STATUSES.has(status) || (Number.isFinite(chance) && chance <= 0);
+}
 
 function weightedMean(values, fallback = 0) {
   const denominator = sum(values.map((item) => item.weight));
@@ -168,7 +175,7 @@ function estimateMinutes(player, history, teamMatches) {
   const recentMinutes = weightedMean(history.map((row) => ({ value: number(row.minutes), weight: row.weight })), number(player.minutes) / Math.max(teamMatches, 1));
   const seasonMinutes = clamp(number(player.minutes) / Math.max(teamMatches, 1), 0, 90);
   const expected = clamp(0.55 * recentMinutes + 0.30 * seasonMinutes + 0.15 * (seasonStartRate * 75 + (1 - seasonStartRate) * 18), 0, 90);
-  const availability = player.status === "u" ? 0 : clamp(number(player.chance, 100) / 100, 0, 1);
+  const availability = isConfirmedUnavailable(player) ? 0 : clamp(number(player.chance, 100) / 100, 0, 1);
   const appearance = availability * weightedRate(history, (row) => number(row.minutes) > 0, seasonAppearanceRate, 3);
   const sixty = availability * weightedRate(history, (row) => number(row.minutes) >= 60, seasonStartRate, 3);
   return {
@@ -472,7 +479,9 @@ function candidatePool(players, currentIds = []) {
   const retained = new Set(currentIds);
   const output = [];
   for (const position of Object.keys(POSITION_LIMITS)) {
-    const group = players.filter((player) => player.position === position && player.status !== "u" && player.chance >= 25);
+    const group = players.filter((player) =>
+      player.position === position && !isConfirmedUnavailable(player) && number(player.chance, 100) >= 25
+    );
     const selected = [
       ...[...group].sort((a, b) => b.selectionScore - a.selectionScore).slice(0, 22),
       ...[...group].sort((a, b) => (b.selectionScore / Math.max(b.price, 3.5)) - (a.selectionScore / Math.max(a.price, 3.5))).slice(0, 8),
@@ -572,16 +581,19 @@ export function optimiseTransfers(currentSquad, players, bank = 0, freeTransfers
   const originalIds = new Set(currentSquad.map((player) => player.id));
   const budget = sum(currentSquad.map((player) => player.price)) + Math.max(0, bank);
   const pool = candidatePool(players, [...originalIds]);
+  const forcedIds = new Set(currentSquad.filter(isConfirmedUnavailable).map((player) => player.id));
   const evaluate = (squad) => {
     const transfers = squad.filter((player) => !originalIds.has(player.id)).length;
     const hitCost = Math.max(0, transfers - freeTransfers) * 4;
-    return { score: squadObjective(squad) - hitCost, transfers, hitCost };
+    const unavailable = squad.filter(isConfirmedUnavailable).length;
+    return { score: squadObjective(squad) - hitCost - unavailable * 1000, transfers, hitCost, unavailable };
   };
   let states = [{ squad: currentSquad, ...evaluate(currentSquad) }];
   let best = states[0];
   const seen = new Set([currentSquad.map((player) => player.id).sort((a, b) => a - b).join("-")]);
 
-  for (let depth = 1; depth <= maxTransfers; depth += 1) {
+  const transferLimit = Math.max(maxTransfers, forcedIds.size);
+  for (let depth = 1; depth <= transferLimit; depth += 1) {
     const next = [];
     for (const state of states) {
       for (const outgoing of state.squad) {
@@ -603,5 +615,11 @@ export function optimiseTransfers(currentSquad, players, bank = 0, freeTransfers
     states = next.slice(0, 900);
     if (!states.length) break;
   }
-  return { ...best, budget };
+  return {
+    ...best,
+    budget,
+    forcedReplacements: currentSquad.filter((player) =>
+      forcedIds.has(player.id) && !best.squad.some((selected) => selected.id === player.id)
+    ).length,
+  };
 }
